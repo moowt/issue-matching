@@ -4,7 +4,7 @@ import { computeScore } from './api/scoring.js'
 import IssueForm from './components/IssueForm.jsx'
 import styles from './App.module.css'
 
-const NEW_ISSUE_THRESHOLD = 0.45
+const NEW_ISSUE_THRESHOLD = 0.30
 
 // sessionStorage からAPIキーを復元（ページリロードまで保持）
 const storedKey = sessionStorage.getItem('openai_api_key') ?? ''
@@ -26,8 +26,8 @@ export default function App() {
   const [queryPersons, setQueryPersons] = useState([''])
   const [queryDate, setQueryDate]       = useState('')
 
-  // ---- Weights ----
-  const [weights, setWeights] = useState({ text: 50, date: 25, person: 25 })
+  // ---- Alphas (各指標の影響度 0〜1) ----
+  const [alphas, setAlphas] = useState({ text: 1.0, date: 1.0, person: 0.5 })
 
   // ---- Results ----
   const [results, setResults]         = useState(null)
@@ -87,7 +87,7 @@ export default function App() {
       const scored = issues
         .map(issue => ({
           issue,
-          ...computeScore({ queryEmbedding, queryPersons: qPersons, queryDate, issue, weights }),
+          ...computeScore({ queryEmbedding, queryPersons: qPersons, queryDate, issue, alphas }),
         }))
         .sort((a, b) => b.total - a.total)
 
@@ -98,19 +98,8 @@ export default function App() {
     setClassifying(false)
   }
 
-  // ---- Weight スライダー（合計100%を維持）----
-  const updateWeight = (key, val) => {
-    const v = Number(val)
-    const others = ['text', 'date', 'person'].filter(k => k !== key)
-    const remaining = 100 - v
-    const sum = weights[others[0]] + weights[others[1]]
-    const ratio = sum > 0 ? remaining / sum : 0.5
-    setWeights({
-      ...weights,
-      [key]: v,
-      [others[0]]: Math.round(weights[others[0]] * ratio),
-      [others[1]]: 100 - v - Math.round(weights[others[0]] * ratio),
-    })
+  const updateAlpha = (key, val) => {
+    setAlphas(prev => ({ ...prev, [key]: Number(val) }))
   }
 
   const topResult = results?.[0]
@@ -222,23 +211,23 @@ export default function App() {
 
           {/* Weights */}
           <div className={styles.card}>
-            <h2 className={styles.panelTitle} style={{ marginBottom: 16 }}>SCORING WEIGHTS</h2>
+            <h2 className={styles.panelTitle} style={{ marginBottom: 16 }}>SCORING PARAMETERS (α)</h2>
             {[
-              { key: 'text',   label: 'Text Similarity (embedding)', color: '#5a5af0' },
-              { key: 'date',   label: 'Date Proximity',              color: '#f0a050' },
-              { key: 'person', label: 'Person / Org Match',          color: '#50d0a0' },
+              { key: 'text',   label: 'Text Similarity (α)',  color: '#5a5af0' },
+              { key: 'date',   label: 'Date Proximity (α)',   color: '#f0a050' },
+              { key: 'person', label: 'Person / Org Match (α)', color: '#50d0a0' },
             ].map(({ key, label, color }) => (
               <div key={key} className={styles.weightRow}>
                 <div className={styles.weightMeta}>
                   <span className={styles.weightLabel}>{label}</span>
-                  <span style={{ fontSize: 11, color, fontWeight: 600 }}>{weights[key]}%</span>
+                  <span style={{ fontSize: 11, color, fontWeight: 600 }}>{alphas[key].toFixed(2)}</span>
                 </div>
                 <div className={styles.trackWrap}>
                   <div className={styles.track}>
-                    <div className={styles.trackFill} style={{ width: `${weights[key]}%`, background: color }} />
+                    <div className={styles.trackFill} style={{ width: `${alphas[key] * 100}%`, background: color }} />
                   </div>
-                  <input type="range" min={0} max={100} value={weights[key]}
-                    onChange={e => updateWeight(key, e.target.value)}
+                  <input type="range" min={0} max={1} step={0.05} value={alphas[key]}
+                    onChange={e => updateAlpha(key, e.target.value)}
                     style={{ width: '100%', accentColor: color }} />
                 </div>
               </div>
