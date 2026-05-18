@@ -28,7 +28,7 @@
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
-      font-size: 14px;
+      font-size: 15px;
       line-height: 1.6;
     }
 
@@ -40,8 +40,8 @@
       border-bottom: 1px solid var(--border);
       margin-bottom: 28px;
     }
-    header h1 { font-size: 22px; font-weight: 700; margin-bottom: 6px; }
-    header p  { color: var(--text2); font-size: 13px; }
+    header h1 { font-size: 24px; font-weight: 700; margin-bottom: 6px; }
+    header p  { color: var(--text2); font-size: 14px; }
 
     .card {
       background: var(--surface);
@@ -51,16 +51,16 @@
       margin-bottom: 16px;
     }
     .card-title {
-      font-size: 11px; font-weight: 700;
+      font-size: 12px; font-weight: 700;
       text-transform: uppercase; letter-spacing: .07em;
       color: var(--text2); margin-bottom: 16px;
     }
 
-    label { display: block; font-size: 12px; color: var(--text2); margin-bottom: 5px; }
+    label { display: block; font-size: 13px; color: var(--text2); margin-bottom: 5px; }
     input[type="text"], input[type="password"], select {
       width: 100%; background: var(--surface2); border: 1px solid var(--border);
       border-radius: 6px; color: var(--text); padding: 9px 12px;
-      font-size: 13px; font-family: inherit; outline: none; transition: border-color .2s;
+      font-size: 14px; font-family: inherit; outline: none; transition: border-color .2s;
     }
     input[type="text"]:focus, input[type="password"]:focus, select:focus { border-color: var(--accent); }
     select { cursor: pointer; }
@@ -70,7 +70,7 @@
 
     /* Buttons */
     .btn {
-      padding: 9px 18px; border-radius: 6px; font-size: 13px; font-weight: 600;
+      padding: 9px 18px; border-radius: 6px; font-size: 14px; font-weight: 600;
       cursor: pointer; border: none; transition: all .15s;
       display: inline-flex; align-items: center; gap: 5px;
     }
@@ -79,7 +79,7 @@
     .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
     .btn-ghost {
       background: transparent; color: var(--text2);
-      border: 1px solid var(--border); padding: 6px 12px; font-size: 12px;
+      border: 1px solid var(--border); padding: 6px 12px; font-size: 13px;
     }
     .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
 
@@ -94,11 +94,11 @@
       display: flex; align-items: center; justify-content: space-between;
       padding: 5px 10px; border-bottom: 1px solid var(--border);
     }
-    .entry-num { font-size: 11px; font-weight: 700; font-family: monospace; color: var(--text2); }
+    .entry-num { font-size: 12px; font-weight: 700; font-family: monospace; color: var(--text2); }
     .entry-ta {
       width: 100%; background: transparent; border: none; color: var(--text);
       padding: 8px 10px; font-family: 'Monaco','Menlo','Consolas',monospace;
-      font-size: 11px; line-height: 1.5; resize: vertical; min-height: 64px;
+      font-size: 12px; line-height: 1.5; resize: vertical; min-height: 64px;
       outline: none;
     }
     .entry-ta:focus { background: rgba(91,142,240,.04); }
@@ -112,12 +112,12 @@
       display: flex; gap: 8px; align-items: center; flex-wrap: wrap;
       margin-top: 4px;
     }
-    .entry-count { font-size: 11px; color: var(--text2); margin-left: auto; }
+    .entry-count { font-size: 12px; color: var(--text2); margin-left: auto; }
 
     /* Tabs */
     .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
     .tab {
-      padding: 10px 22px; font-size: 13px; font-weight: 500;
+      padding: 10px 22px; font-size: 14px; font-weight: 500;
       color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent;
       margin-bottom: -1px; transition: all .15s; user-select: none;
     }
@@ -156,8 +156,8 @@
       background: var(--surface2); border: 1px solid var(--border);
       border-radius: 6px; padding: 11px; text-align: center;
     }
-    .stat-val { font-size: 18px; font-weight: 700; }
-    .stat-lbl { font-size: 10px; color: var(--text2); margin-top: 3px; line-height: 1.3; }
+    .stat-val { font-size: 20px; font-weight: 700; }
+    .stat-lbl { font-size: 11px; color: var(--text2); margin-top: 3px; line-height: 1.3; }
 
     /* Comparison */
     .cmp-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; margin-bottom: 24px; }
@@ -166,11 +166,11 @@
       border-radius: 8px; padding: 20px; text-align: center;
     }
     .cmp-val { font-size: 30px; font-weight: 700; }
-    .cmp-lbl { font-size: 12px; color: var(--text2); margin-top: 5px; line-height: 1.4; }
+    .cmp-lbl { font-size: 13px; color: var(--text2); margin-top: 5px; line-height: 1.4; }
 
     .sig-badge {
       display: inline-block; padding: 3px 10px; border-radius: 12px;
-      font-size: 11px; font-weight: 700;
+      font-size: 12px; font-weight: 700;
     }
     .sig-yes { background: rgba(62,207,142,.15); color: var(--success); border: 1px solid rgba(62,207,142,.3); }
     .sig-no  { background: rgba(139,144,160,.15); color: var(--text2); border: 1px solid var(--border); }
@@ -190,7 +190,7 @@
     .key-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
     .key-chip {
       padding: 3px 9px; border-radius: 10px; background: var(--surface2);
-      border: 1px solid var(--border); font-size: 11px; font-family: monospace;
+      border: 1px solid var(--border); font-size: 12px; font-family: monospace;
       cursor: pointer; color: var(--text2); transition: all .15s; user-select: none;
     }
     .key-chip:hover { border-color: var(--accent); color: var(--accent); }
@@ -200,7 +200,7 @@
     .option-row {
       display: flex; align-items: center; gap: 10px;
       padding: 10px 14px; background: var(--surface2);
-      border: 1px solid var(--border); border-radius: 6px; font-size: 13px;
+      border: 1px solid var(--border); border-radius: 6px; font-size: 14px;
     }
     .option-row input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent); }
 
@@ -212,19 +212,19 @@
     }
 
     /* Status */
-    .status { padding: 11px 15px; border-radius: 6px; font-size: 13px; margin: 10px 0; }
+    .status { padding: 11px 15px; border-radius: 6px; font-size: 14px; margin: 10px 0; }
     .status-info    { background: rgba(91,142,240,.1);  border: 1px solid rgba(91,142,240,.3);  color: var(--accent); }
     .status-success { background: rgba(62,207,142,.1);  border: 1px solid rgba(62,207,142,.3);  color: var(--success); }
     .status-error   { background: rgba(240,96,96,.1);   border: 1px solid rgba(240,96,96,.3);   color: var(--danger); }
     .status-warn    { background: rgba(245,166,35,.1);  border: 1px solid rgba(245,166,35,.3);  color: var(--warning); }
 
     /* Legend */
-    .legend-bar { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 10px; color: var(--text2); }
+    .legend-bar { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 11px; color: var(--text2); }
     .legend-gradient { display: flex; gap: 1px; border-radius: 3px; overflow: hidden; }
     .legend-swatch { width: 18px; height: 10px; }
 
     .separator { height: 1px; background: var(--border); margin: 22px 0; }
-    .no-data { text-align: center; padding: 40px; color: var(--text2); font-size: 13px; }
+    .no-data { text-align: center; padding: 40px; color: var(--text2); font-size: 14px; }
     .hidden { display: none !important; }
 
     .spinner {
@@ -255,7 +255,7 @@
       <div class="form-group">
         <label for="apiKey">OpenAI API キー</label>
         <input type="password" id="apiKey" placeholder="sk-..." autocomplete="off">
-        <div style="font-size:11px;color:var(--text2);margin-top:4px;">
+        <div style="font-size:12px;color:var(--text2);margin-top:4px;">
           メモリ上にのみ保持。OpenAI embedding API へのリクエスト以外には送信しません。
         </div>
       </div>
@@ -311,7 +311,7 @@
     <div class="card">
       <div class="card-title">
         <span class="badge badge-b">GROUP B</span>
-        <span style="font-size:11px;color:var(--text2);margin-left:8px;font-weight:400;">（省略可）</span>
+        <span style="font-size:12px;color:var(--text2);margin-left:8px;font-weight:400;">（省略可）</span>
       </div>
       <div class="form-group">
         <label for="nameB">グループ名</label>
@@ -336,18 +336,18 @@
       <input type="checkbox" id="doMW">
       <span>
         A・B 間の Mann-Whitney U 検定を実施する
-        <span style="color:var(--text2);font-size:12px;">（各グループに 2 件以上必要）</span>
+        <span style="color:var(--text2);font-size:13px;">（各グループに 2 件以上必要）</span>
       </span>
     </label>
   </div>
 
   <!-- Run -->
   <div style="text-align:center; margin:24px 0 18px;">
-    <button class="btn btn-primary" id="runBtn" onclick="runAnalysis()" style="padding:13px 44px;font-size:15px;">
+    <button class="btn btn-primary" id="runBtn" onclick="runAnalysis()" style="padding:13px 44px;font-size:16px;">
       分析実行
     </button>
     <div id="progWrap" class="hidden" style="max-width:480px;margin:14px auto 0;">
-      <div id="progText" style="font-size:12px;color:var(--text2);margin-bottom:5px;"></div>
+      <div id="progText" style="font-size:13px;color:var(--text2);margin-bottom:5px;"></div>
       <div class="progress-bar"><div class="progress-fill" id="progFill" style="width:0%"></div></div>
     </div>
   </div>
@@ -501,14 +501,20 @@ function debounce(fn,ms){let t;return(...a)=>{clearTimeout(t);t=setTimeout(()=>f
 
 // ─── API ──────────────────────────────────────────────────────────────────────
 
+const embCache = new Map();
+
 async function embed(text, apiKey, model) {
+  const key = `${model}::${text}`;
+  if (embCache.has(key)) return embCache.get(key);
   const r = await fetch('https://api.openai.com/v1/embeddings',{
     method:'POST',
     headers:{'Content-Type':'application/json','Authorization':`Bearer ${apiKey}`},
     body:JSON.stringify({model,input:text}),
   });
   if(!r.ok){const e=await r.json().catch(()=>({}));throw new Error(`API ${r.status}: ${e.error?.message||r.statusText}`);}
-  return (await r.json()).data[0].embedding;
+  const vec = (await r.json()).data[0].embedding;
+  embCache.set(key, vec);
+  return vec;
 }
 
 // ─── Entry management ─────────────────────────────────────────────────────────
@@ -948,16 +954,18 @@ async function runAnalysis() {
     const embA=[], embB=[];
 
     for(let i=0;i<nA;i++){
-      setProgress(done/total*95, `Group A: embedding ${i+1}/${nA} 取得中…`);
       const txt = extractText(outsA[i], embKeys);
       if(!txt) throw new Error(`Group A #${i+1}: 指定キーからテキストを抽出できませんでした`);
+      const cached = embCache.has(`${model}::${txt}`);
+      setProgress(done/total*95, `Group A: ${i+1}/${nA}${cached?' (キャッシュ)':''}`);
       embA.push(await embed(txt, apiKey, model));
       done++;
     }
     for(let i=0;i<nB;i++){
-      setProgress(done/total*95, `Group B: embedding ${i+1}/${nB} 取得中…`);
       const txt = extractText(outsB[i], embKeys);
       if(!txt) throw new Error(`Group B #${i+1}: 指定キーからテキストを抽出できませんでした`);
+      const cached = embCache.has(`${model}::${txt}`);
+      setProgress(done/total*95, `Group B: ${i+1}/${nB}${cached?' (キャッシュ)':''}`);
       embB.push(await embed(txt, apiKey, model));
       done++;
     }
