@@ -84,7 +84,7 @@
     .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
 
     /* Entry list */
-    .models-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .models-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
     .entry-list { margin-bottom: 10px; }
     .entry-row {
       background: var(--surface2); border: 1px solid var(--border);
@@ -185,6 +185,7 @@
     }
     .badge-a { background: rgba(91,142,240,.15); color: var(--accent); border: 1px solid rgba(91,142,240,.3); }
     .badge-b { background: rgba(124,108,240,.15); color: var(--accent2); border: 1px solid rgba(124,108,240,.3); }
+    .badge-g { background: rgba(62,207,142,.15); color: var(--success); border: 1px solid rgba(62,207,142,.3); }
 
     /* Key chips */
     .key-chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 7px; }
@@ -234,6 +235,19 @@
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
+    /* Golden textarea */
+    .golden-ta {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text);
+      padding: 8px 10px; font-family: 'Monaco','Menlo','Consolas',monospace;
+      font-size: 12px; line-height: 1.5; resize: vertical; min-height: 100px;
+      outline: none; transition: border-color .2s;
+    }
+    .golden-ta:focus { border-color: var(--success); }
+
+    @media (max-width: 1000px) {
+      .models-grid { grid-template-columns: 1fr 1fr; }
+    }
     @media (max-width: 800px) {
       .form-row, .models-grid, .two-col, .cmp-grid, .stats-pair { grid-template-columns: 1fr; }
       .stats-grid { grid-template-columns: repeat(2, 1fr); }
@@ -325,6 +339,22 @@
           一括インポート
         </label>
         <span class="entry-count" id="countB">0 件</span>
+      </div>
+    </div>
+
+    <!-- Group G (Golden) -->
+    <div class="card">
+      <div class="card-title">
+        <span class="badge badge-g">GOLDEN</span>
+        <span style="font-size:12px;color:var(--text2);margin-left:8px;font-weight:400;">（任意・1件）</span>
+      </div>
+      <div class="form-group">
+        <label for="nameG">データセット名</label>
+        <input type="text" id="nameG" value="Golden" placeholder="例: 正解データ">
+      </div>
+      <div class="form-group">
+        <label>ゴールデン JSON（1件）</label>
+        <textarea id="inputG" class="golden-ta" placeholder='{"key": "value", ...}'></textarea>
       </div>
     </div>
   </div>
@@ -597,7 +627,8 @@ function bulkImport(group, input) {
 // ─── Key detection ────────────────────────────────────────────────────────────
 
 function detectKeys() {
-  const raw = [...document.querySelectorAll('.entry-ta')].map(t=>t.value.trim()).find(Boolean);
+  const raw = [...document.querySelectorAll('.entry-ta'), document.getElementById('inputG')]
+    .map(t=>t?.value.trim()).find(Boolean);
   if (!raw) return;
   try {
     const obj = JSON.parse(raw);
@@ -627,7 +658,7 @@ function simColor(v, lo, hi) {
   return { bg:`rgb(${r},${g},${b})`, text: t>.55?'#fff':'#1a1d27' };
 }
 
-function renderLegend(id, lo, hi) {
+function renderLegend(id, lo, hi, nA, nB, nG) {
   const el = document.getElementById(id);
   if (!el) return;
   const steps = 8;
@@ -635,15 +666,20 @@ function renderLegend(id, lo, hi) {
     const c=simColor(lo+(hi-lo)*k/steps,lo,hi);
     return `<div class="legend-swatch" style="background:${c.bg}" title="${(lo+(hi-lo)*k/steps).toFixed(3)}"></div>`;
   }).join('');
+  const grpLabels = [
+    nA>0 ? `<span style="color:var(--accent);font-weight:700;">■</span> A` : '',
+    nB>0 ? `<span style="color:var(--accent2);font-weight:700;">■</span> B` : '',
+    nG>0 ? `<span style="color:var(--success);font-weight:700;">■</span> G` : '',
+  ].filter(Boolean).join('　');
   el.innerHTML = `<span>${lo.toFixed(3)}</span><div class="legend-gradient">${sw}</div><span>${hi.toFixed(3)}</span>
     <span style="margin-left:8px;">（対角=自己類似度）</span>
-    <span style="margin-left:8px;"><span style="color:var(--accent);font-weight:700;">■</span> A　<span style="color:var(--accent2);font-weight:700;">■</span> B</span>`;
+    <span style="margin-left:8px;">${grpLabels}</span>`;
 }
 
 // ─── Heatmap ──────────────────────────────────────────────────────────────────
 
-function renderHeatmap(mat, nA, nB) {
-  const n = nA + nB;
+function renderHeatmap(mat, nA, nB, nG) {
+  const n = nA + nB + nG;
   const container = document.getElementById('hmGrid');
   container.innerHTML = '';
 
@@ -658,8 +694,26 @@ function renderHeatmap(mat, nA, nB) {
   for(let i=0;i<n;i++) for(let j=0;j<n;j++) if(i!==j){lo=Math.min(lo,mat[i][j]);hi=Math.max(hi,mat[i][j]);}
   if(!isFinite(lo)){lo=0;hi=1;}
 
-  function lbl(idx) { return idx<nA ? `A${idx+1}` : `B${idx-nA+1}`; }
-  function lblColor(idx) { return idx<nA ? 'var(--accent)' : 'var(--accent2)'; }
+  function lbl(idx) {
+    if(idx<nA) return `A${idx+1}`;
+    if(idx<nA+nB) return `B${idx-nA+1}`;
+    return `G${idx-nA-nB+1}`;
+  }
+  function lblColor(idx) {
+    if(idx<nA) return 'var(--accent)';
+    if(idx<nA+nB) return 'var(--accent2)';
+    return 'var(--success)';
+  }
+  function borderLeft(j) {
+    if(j===nA && nA>0 && nB>0) return 'border-left:2px solid rgba(124,108,240,.4);';
+    if(j===nA+nB && (nA+nB)>0 && nG>0) return 'border-left:2px solid rgba(62,207,142,.4);';
+    return '';
+  }
+  function borderTop(i) {
+    if(i===nA && nA>0 && nB>0) return 'border-top:2px solid rgba(124,108,240,.4);';
+    if(i===nA+nB && (nA+nB)>0 && nG>0) return 'border-top:2px solid rgba(62,207,142,.4);';
+    return '';
+  }
 
   // Corner
   const corner = document.createElement('div');
@@ -670,22 +724,19 @@ function renderHeatmap(mat, nA, nB) {
   for(let j=0;j<n;j++){
     const d = document.createElement('div');
     d.className = 'hm-lbl';
-    d.style.cssText = `width:${CELL}px;height:${LBL}px;color:${lblColor(j)};font-size:${CELL<30?'8':'9'}px;
-      ${j===nA&&nA>0&&nB>0?'border-left:2px solid rgba(124,108,240,.4);':''}`;
+    d.style.cssText = `width:${CELL}px;height:${LBL}px;color:${lblColor(j)};font-size:${CELL<30?'8':'9'}px;${borderLeft(j)}`;
     d.textContent = lbl(j);
-    d.title = j<nA ? `Group A, 試行 ${j+1}` : `Group B, 試行 ${j-nA+1}`;
+    d.title = j<nA ? `Group A, 試行 ${j+1}` : j<nA+nB ? `Group B, 試行 ${j-nA+1}` : `Golden, ${j-nA-nB+1}`;
     container.appendChild(d);
   }
 
   // Rows
   for(let i=0;i<n;i++){
-    // Row label
     const rl = document.createElement('div');
     rl.className = 'hm-lbl';
-    rl.style.cssText = `width:${LBL}px;height:${CELL}px;color:${lblColor(i)};font-size:${CELL<30?'8':'9'}px;
-      ${i===nA&&nA>0&&nB>0?'border-top:2px solid rgba(124,108,240,.4);':''}`;
+    rl.style.cssText = `width:${LBL}px;height:${CELL}px;color:${lblColor(i)};font-size:${CELL<30?'8':'9'}px;${borderTop(i)}`;
     rl.textContent = lbl(i);
-    rl.title = i<nA ? `Group A, 試行 ${i+1}` : `Group B, 試行 ${i-nA+1}`;
+    rl.title = i<nA ? `Group A, 試行 ${i+1}` : i<nA+nB ? `Group B, 試行 ${i-nA+1}` : `Golden, ${i-nA-nB+1}`;
     container.appendChild(rl);
 
     for(let j=0;j<n;j++){
@@ -694,9 +745,7 @@ function renderHeatmap(mat, nA, nB) {
       cell.className = 'hm-cell';
       cell.style.width  = CELL+'px';
       cell.style.height = CELL+'px';
-      let extra = '';
-      if(j===nA&&nA>0&&nB>0) extra += 'border-left:2px solid rgba(124,108,240,.4);';
-      if(i===nA&&nA>0&&nB>0) extra += 'border-top:2px solid rgba(124,108,240,.4);';
+      const extra = borderLeft(j) + borderTop(i);
       if(i===j){
         cell.style.cssText += `background:#1e2d4e;color:var(--accent);${extra}`;
         cell.textContent = '1.00';
@@ -705,13 +754,12 @@ function renderHeatmap(mat, nA, nB) {
         cell.style.cssText += `background:${c.bg};color:${c.text};${extra}`;
         cell.textContent = CELL>=28 ? v.toFixed(2) : '';
       }
-      const al = lbl(i), bl = lbl(j);
-      cell.title = `${al} × ${bl}: ${v.toFixed(4)}`;
+      cell.title = `${lbl(i)} × ${lbl(j)}: ${v.toFixed(4)}`;
       container.appendChild(cell);
     }
   }
 
-  renderLegend('hmLegend', lo, hi);
+  renderLegend('hmLegend', lo, hi, nA, nB, nG);
 }
 
 // ─── Stats blocks ─────────────────────────────────────────────────────────────
@@ -768,7 +816,7 @@ function mkChart(id,type,data,options){
   charts[id]=new Chart(el.getContext('2d'),{type,data,options});
 }
 
-function renderComparison(stA, stB, cSim, mw, nameA, nameB, showMW) {
+function renderComparison(stA, stB, cSim, mw, nameA, nameB, showMW, gInfo) {
   const container = document.getElementById('cmpContent');
 
   let mwHtml = '';
@@ -791,6 +839,33 @@ function renderComparison(stA, stB, cSim, mw, nameA, nameB, showMW) {
     : stA.mean > stB.mean ? nameA : nameB;
   const betterColor = betterName === nameA ? 'var(--accent)' : betterName === nameB ? 'var(--accent2)' : 'var(--text2)';
 
+  // Golden section
+  let goldenHtml = '';
+  if (gInfo) {
+    const { nameG, simAG, simBG } = gInfo;
+    const closerName = simBG == null ? '—'
+      : Math.abs(simAG - simBG) < 0.0001 ? '同等'
+      : simAG > simBG ? nameA : nameB;
+    const closerColor = closerName === nameA ? 'var(--accent)' : closerName === nameB ? 'var(--accent2)' : 'var(--text2)';
+    goldenHtml = `
+      <div class="separator"></div>
+      <div style="font-size:13px;font-weight:600;color:var(--success);margin-bottom:14px;">ゴールデンデータセット比較（${nameG}）</div>
+      <div class="cmp-grid" style="grid-template-columns: repeat(${simBG!=null?3:2}, 1fr);">
+        <div class="cmp-card">
+          <div class="cmp-val" style="color:var(--accent)">${simAG.toFixed(4)}</div>
+          <div class="cmp-lbl">${nameA} vs ${nameG}<br><small>（全エントリの平均 cos 類似度）</small></div>
+        </div>
+        ${simBG!=null ? `<div class="cmp-card">
+          <div class="cmp-val" style="color:var(--accent2)">${simBG.toFixed(4)}</div>
+          <div class="cmp-lbl">${nameB} vs ${nameG}<br><small>（全エントリの平均 cos 類似度）</small></div>
+        </div>` : ''}
+        <div class="cmp-card">
+          <div class="cmp-val" style="font-size:20px;color:${closerColor}">${closerName}</div>
+          <div class="cmp-lbl">ゴールデンに近いグループ<br><small>（平均類似度で判定）</small></div>
+        </div>
+      </div>`;
+  }
+
   container.innerHTML = `
     <div class="cmp-grid" style="${showMW?'':'grid-template-columns: repeat(2, 1fr);'}">
       <div class="cmp-card">
@@ -803,6 +878,7 @@ function renderComparison(stA, stB, cSim, mw, nameA, nameB, showMW) {
         <div class="cmp-lbl">より一貫性が高いグループ<br><small>（平均類似度で判定）</small></div>
       </div>
     </div>
+    ${goldenHtml}
     <div class="separator"></div>
     <div class="two-col">
       <div>
@@ -917,7 +993,9 @@ async function runAnalysis() {
   const distKeys= document.getElementById('distKeys').value.split(',').map(k=>k.trim()).filter(Boolean);
   const nameA   = document.getElementById('nameA').value.trim() || 'Model A';
   const nameB   = document.getElementById('nameB').value.trim() || 'Model B';
+  const nameG   = document.getElementById('nameG').value.trim() || 'Golden';
   const doMW    = document.getElementById('doMW').checked;
+  const rawG    = document.getElementById('inputG').value.trim();
 
   if(!apiKey)           return setMsg('globalMsg','OpenAI API キーを入力してください','error');
   if(!apiKey.startsWith('sk-')) return setMsg('globalMsg','API キーは "sk-" で始まる必要があります','error');
@@ -927,8 +1005,14 @@ async function runAnalysis() {
   const rawA = getEntryValues('A');
   const rawB = getEntryValues('B');
   const nA = rawA.length, nB = rawB.length;
+  let outsG = null;
+  if (rawG) {
+    try { outsG = JSON.parse(rawG); }
+    catch(e) { return setMsg('globalMsg', `Golden JSON のパースエラー: ${e.message}`, 'error'); }
+  }
+  const nG = outsG ? 1 : 0;
 
-  if(nA + nB < 2) return setMsg('globalMsg','合計で 2 件以上の JSON エントリが必要です','error');
+  if(nA + nB + nG < 2) return setMsg('globalMsg','合計で 2 件以上の JSON エントリが必要です','error');
 
   const outsA = [], outsB = [];
   for(let i=0;i<nA;i++){
@@ -947,11 +1031,11 @@ async function runAnalysis() {
   document.getElementById('progWrap').classList.remove('hidden');
   document.getElementById('results').classList.add('hidden');
 
-  const total = nA + nB;
+  const total = nA + nB + nG;
   let done = 0;
 
   try {
-    const embA=[], embB=[];
+    const embA=[], embB=[], embG=[];
 
     for(let i=0;i<nA;i++){
       const txt = extractText(outsA[i], embKeys);
@@ -969,18 +1053,26 @@ async function runAnalysis() {
       embB.push(await embed(txt, apiKey, model));
       done++;
     }
+    if(outsG){
+      const txt = extractText(outsG, embKeys);
+      if(!txt) throw new Error('Golden: 指定キーからテキストを抽出できませんでした');
+      const cached = embCache.has(`${model}::${txt}`);
+      setProgress(done/total*95, `Golden${cached?' (キャッシュ)':''}`);
+      embG.push(await embed(txt, apiKey, model));
+      done++;
+    }
 
     setProgress(98, '統計計算中…');
 
-    // Combined matrix (A first, then B)
-    const allEmbs = [...embA, ...embB];
+    // Combined matrix (A → B → G)
+    const allEmbs = [...embA, ...embB, ...embG];
     const mat = simMatrix(allEmbs);
 
     // Per-group stats from submatrix
     const stA = nA >= 2 ? subStats(mat, 0,  nA,   0,  nA)  : null;
     const stB = nB >= 2 ? subStats(mat, nA, nA+nB, nA, nA+nB) : null;
 
-    // Centroid analysis (only if both groups exist)
+    // Centroid analysis (only if both A and B exist)
     let cSim = null, mw = null;
     if(nA > 0 && nB > 0){
       const cA = centroid(embA), cB = centroid(embB);
@@ -988,13 +1080,35 @@ async function runAnalysis() {
       if(doMW && stA && stB) mw = mannWhitneyU(stA.vals, stB.vals);
     }
 
+    // Golden analysis
+    let gInfo = null;
+    if(nG > 0){
+      const embGVec = embG[0];
+      const simAG = nA > 0 ? embA.reduce((s,e)=>s+cosSim(e,embGVec),0)/nA : null;
+      const simBG = nB > 0 ? embB.reduce((s,e)=>s+cosSim(e,embGVec),0)/nB : null;
+      gInfo = { nameG, simAG, simBG };
+    }
+
     // ── Stability tab ──
-    renderHeatmap(mat, nA, nB);
+    renderHeatmap(mat, nA, nB, nG);
     renderGroupStats(stA, stB, nA, nB, nameA, nameB);
 
     // ── Comparison tab ──
     if(nA > 0 && nB > 0){
-      renderComparison(stA, stB, cSim, mw, nameA, nameB, doMW);
+      renderComparison(stA, stB, cSim, mw, nameA, nameB, doMW, gInfo);
+    } else if(nG > 0 && gInfo) {
+      // Only G + one group: show golden comparison only
+      const simAG = gInfo.simAG, simBG = gInfo.simBG;
+      const singleSim = simAG ?? simBG;
+      const singleName = simAG != null ? nameA : nameB;
+      document.getElementById('cmpContent').innerHTML = `
+        <div style="font-size:13px;font-weight:600;color:var(--success);margin-bottom:14px;">ゴールデンデータセット比較（${nameG}）</div>
+        <div class="cmp-grid" style="grid-template-columns: repeat(1, 1fr); max-width: 300px;">
+          <div class="cmp-card">
+            <div class="cmp-val" style="color:var(--accent)">${singleSim.toFixed(4)}</div>
+            <div class="cmp-lbl">${singleName} vs ${nameG}<br><small>（全エントリの平均 cos 類似度）</small></div>
+          </div>
+        </div>`;
     } else {
       document.getElementById('cmpContent').innerHTML =
         '<div class="no-data">Group B にデータを追加すると、モデル間の比較分析が実行されます。</div>';
@@ -1019,8 +1133,9 @@ async function runAnalysis() {
 
 // ─── Init ─────────────────────────────────────────────────────────────────────
 
-// Start with 3 entries for A, 0 for B
+// Start with 3 entries for A, 0 for B, Golden textarea listens for key detection
 for(let i=0;i<3;i++) addEntry('A');
+document.getElementById('inputG').addEventListener('input', debouncedDetect);
 </script>
 </body>
 </html>
