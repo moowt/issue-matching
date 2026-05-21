@@ -115,6 +115,11 @@
     .entry-count { font-size: 12px; color: var(--text2); margin-left: auto; }
 
     /* Tabs */
+    .tabs-row {
+      display: flex; align-items: flex-end; justify-content: space-between;
+      border-bottom: 1px solid var(--border); margin-bottom: 24px;
+    }
+    .tabs-row .tabs { border-bottom: none; margin-bottom: 0; }
     .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
     .tab {
       padding: 10px 22px; font-size: 14px; font-weight: 500;
@@ -386,10 +391,13 @@
 
   <!-- Results -->
   <div id="results" class="hidden">
-    <div class="tabs">
-      <div class="tab active" data-tab="stability" onclick="switchTab(this)">安定性（複合）</div>
-      <div class="tab" data-tab="comparison" onclick="switchTab(this)">モデル間比較</div>
-      <div class="tab" data-tab="distribution" onclick="switchTab(this)">分布分析</div>
+    <div class="tabs-row">
+      <div class="tabs">
+        <div class="tab active" data-tab="stability" onclick="switchTab(this)">安定性（複合）</div>
+        <div class="tab" data-tab="comparison" onclick="switchTab(this)">モデル間比較</div>
+        <div class="tab" data-tab="distribution" onclick="switchTab(this)">分布分析</div>
+      </div>
+      <button class="btn btn-ghost" id="copyBtn" onclick="copyReport()" style="font-size:12px;padding:5px 14px;white-space:nowrap;margin-bottom:6px;">レポートをコピー</button>
     </div>
 
     <!-- Stability -->
@@ -1117,6 +1125,15 @@ async function runAnalysis() {
     // ── Distribution tab ──
     renderDistCharts(outsA, outsB, nameA, nameB, distKeys);
 
+    lastResult = {
+      nameA, nameB, nameG, nA, nB, nG,
+      stA, stB, cSim, mw, gInfo, mat,
+      embKeys, model,
+      doMW, outsA, outsB, outsG,
+      distKeysFinal: distKeys,
+      timestamp: new Date(),
+    };
+
     setProgress(100,'完了');
     document.getElementById('results').classList.remove('hidden');
     document.getElementById('results').scrollIntoView({behavior:'smooth',block:'start'});
@@ -1128,6 +1145,160 @@ async function runAnalysis() {
   } finally {
     btn.disabled = false;
     document.getElementById('progWrap').classList.add('hidden');
+  }
+}
+
+// ─── Markdown report ──────────────────────────────────────────────────────────
+
+let lastResult = null;
+
+function generateMarkdown(r) {
+  const ts = r.timestamp.toLocaleString('ja-JP', {
+    year:'numeric', month:'2-digit', day:'2-digit',
+    hour:'2-digit', minute:'2-digit'
+  });
+
+  const fmtStat = (st, name, n) => {
+    if (!st) return '';
+    return `### ${name}（${n}件）\n` +
+      `| 指標 | 値 |\n|---|---|\n` +
+      `| 平均類似度 | ${st.mean.toFixed(4)} |\n` +
+      `| 最小類似度 | ${st.min.toFixed(4)} |\n` +
+      `| 最大類似度 | ${st.max.toFixed(4)} |\n` +
+      `| 標準偏差   | ${st.std.toFixed(4)} |\n`;
+  };
+
+  const lines = [];
+
+  // ── Header ──
+  lines.push('# LLM出力一貫性・モデル間比較レポート', '');
+  lines.push(`**生成日時**: ${ts}`);
+  lines.push(`**Embeddingモデル**: ${r.model}`);
+  if (r.embKeys.length) lines.push(`**対象キー**: ${r.embKeys.join(', ')}`);
+  const countParts = [`${r.nameA} = ${r.nA}件`];
+  if (r.nB > 0) countParts.push(`${r.nameB} = ${r.nB}件`);
+  if (r.nG > 0) countParts.push(`${r.nameG} = ${r.nG}件`);
+  lines.push(`**エントリ数**: ${countParts.join(' / ')}`);
+  lines.push('', '---', '');
+
+  // ── Stability ──
+  lines.push('## モデル内安定性', '');
+  const statA = fmtStat(r.stA, r.nameA, r.nA);
+  const statB = fmtStat(r.stB, r.nameB, r.nB);
+  if (statA) lines.push(statA);
+  if (statB) lines.push(statB);
+  if (!statA && !statB) lines.push('*安定性統計を算出するには各グループ2件以上が必要です。*', '');
+  lines.push('---', '');
+
+  // ── Comparison ──
+  lines.push('## モデル間比較', '');
+
+  if (r.cSim != null) {
+    lines.push(`| 指標 | 値 |\n|---|---|`);
+    lines.push(`| セントロイド間 cos 類似度（${r.nameA} ↔ ${r.nameB}） | ${r.cSim.toFixed(4)} |`);
+    if (r.stA && r.stB) {
+      const better = r.stA.mean >= r.stB.mean ? r.nameA : r.nameB;
+      lines.push(`| より一貫性が高いグループ | ${better} |`);
+    }
+    lines.push('');
+  }
+
+  if (r.doMW && r.mw) {
+    const mw = r.mw;
+    lines.push('### Mann-Whitney U 検定', '');
+    lines.push(`| 指標 | 値 |\n|---|---|`);
+    lines.push(`| p 値 | ${mw.p.toFixed(4)} |`);
+    lines.push(`| 有意差 | ${mw.significant ? 'あり (p < 0.05)' : 'なし'} |`);
+    lines.push(`| U 統計量 | ${mw.U} |`);
+    lines.push(`| z 統計量 | ${mw.z.toFixed(4)} |`);
+    lines.push('');
+  }
+
+  if (r.gInfo) {
+    const g = r.gInfo;
+    lines.push(`### ゴールデンデータセット比較（${g.nameG}）`, '');
+    lines.push(`| 指標 | 値 |\n|---|---|`);
+    if (g.simAG != null) lines.push(`| ${r.nameA} vs ${g.nameG}（平均 cos 類似度） | ${g.simAG.toFixed(4)} |`);
+    if (g.simBG != null) lines.push(`| ${r.nameB} vs ${g.nameG}（平均 cos 類似度） | ${g.simBG.toFixed(4)} |`);
+    if (g.simAG != null && g.simBG != null) {
+      const closer = g.simAG >= g.simBG ? r.nameA : r.nameB;
+      lines.push(`| ゴールデンに近いグループ | ${closer} |`);
+    }
+    lines.push('');
+  }
+
+  lines.push('---', '');
+
+  // ── Similarity matrix ──
+  const n = r.nA + r.nB + r.nG;
+  if (n > 0 && r.mat) {
+    lines.push('## 類似度行列', '');
+    const lbl = i => {
+      if (i < r.nA) return `A${i+1}`;
+      if (i < r.nA+r.nB) return `B${i-r.nA+1}`;
+      return `G${i-r.nA-r.nB+1}`;
+    };
+    const W = 7;
+    const pad = s => s.padStart(W);
+    const headerRow = ' '.repeat(W) + ' ' + Array.from({length:n}, (_,i)=>pad(lbl(i))).join(' ');
+    lines.push('```');
+    lines.push(headerRow);
+    for (let i=0;i<n;i++) {
+      const row = pad(lbl(i)) + ' ' + r.mat[i].map(v=>pad(v.toFixed(4))).join(' ');
+      lines.push(row);
+    }
+    lines.push('```', '');
+    lines.push('---', '');
+  }
+
+  // ── Distribution analysis ──
+  const distKeys = r.distKeysFinal;
+  if (distKeys.length > 0 && (r.outsA.length > 0 || (r.outsB && r.outsB.length > 0))) {
+    lines.push('## 分布分析', '');
+
+    const flatStr = v => {
+      if (v == null) return '';
+      if (typeof v === 'object') return JSON.stringify(v);
+      return String(v);
+    };
+    const deepGet = (obj, key) => {
+      const parts = key.split('.');
+      let cur = obj;
+      for (const p of parts) { if (cur == null) return undefined; cur = cur[p]; }
+      return cur;
+    };
+
+    for (const key of distKeys) {
+      const vA = (r.outsA || []).map(o => flatStr(deepGet(o, key))).filter(Boolean);
+      const vB = (r.outsB || []).map(o => flatStr(deepGet(o, key))).filter(Boolean);
+      const allVals = [...new Set([...vA, ...vB])].sort();
+      if (!allVals.length) continue;
+
+      lines.push(`### キー: "${key}"`, '');
+      lines.push(`| 値 | ${r.nameA} | ${r.nB > 0 ? r.nameB : ''} |\n|---|---|${r.nB > 0 ? '---|' : ''}`);
+      for (const v of allVals) {
+        const ca = vA.filter(x=>x===v).length;
+        const cb = vB.filter(x=>x===v).length;
+        lines.push(`| ${v} | ${ca} | ${r.nB > 0 ? cb : ''} |`);
+      }
+      lines.push('');
+    }
+  }
+
+  return lines.join('\n');
+}
+
+async function copyReport() {
+  if (!lastResult) return;
+  const md = generateMarkdown(lastResult);
+  try {
+    await navigator.clipboard.writeText(md);
+    const btn = document.getElementById('copyBtn');
+    const orig = btn.textContent;
+    btn.textContent = 'コピーしました！';
+    setTimeout(() => btn.textContent = orig, 2000);
+  } catch(e) {
+    setMsg('globalMsg', 'クリップボードへのコピーに失敗しました', 'error');
   }
 }
 
