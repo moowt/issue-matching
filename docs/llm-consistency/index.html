@@ -28,7 +28,7 @@
       background: var(--bg);
       color: var(--text);
       min-height: 100vh;
-      font-size: 15px;
+      font-size: 16px;
       line-height: 1.6;
     }
 
@@ -40,8 +40,8 @@
       border-bottom: 1px solid var(--border);
       margin-bottom: 28px;
     }
-    header h1 { font-size: 24px; font-weight: 700; margin-bottom: 6px; }
-    header p  { color: var(--text2); font-size: 14px; }
+    header h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
+    header p  { color: var(--text2); font-size: 15px; }
 
     .card {
       background: var(--surface);
@@ -51,16 +51,16 @@
       margin-bottom: 16px;
     }
     .card-title {
-      font-size: 12px; font-weight: 700;
+      font-size: 13px; font-weight: 700;
       text-transform: uppercase; letter-spacing: .07em;
       color: var(--text2); margin-bottom: 16px;
     }
 
-    label { display: block; font-size: 13px; color: var(--text2); margin-bottom: 5px; }
+    label { display: block; font-size: 14px; color: var(--text2); margin-bottom: 5px; }
     input[type="text"], input[type="password"], select {
       width: 100%; background: var(--surface2); border: 1px solid var(--border);
       border-radius: 6px; color: var(--text); padding: 9px 12px;
-      font-size: 14px; font-family: inherit; outline: none; transition: border-color .2s;
+      font-size: 15px; font-family: inherit; outline: none; transition: border-color .2s;
     }
     input[type="text"]:focus, input[type="password"]:focus, select:focus { border-color: var(--accent); }
     select { cursor: pointer; }
@@ -70,7 +70,7 @@
 
     /* Buttons */
     .btn {
-      padding: 9px 18px; border-radius: 6px; font-size: 14px; font-weight: 600;
+      padding: 9px 18px; border-radius: 6px; font-size: 15px; font-weight: 600;
       cursor: pointer; border: none; transition: all .15s;
       display: inline-flex; align-items: center; gap: 5px;
     }
@@ -79,7 +79,7 @@
     .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
     .btn-ghost {
       background: transparent; color: var(--text2);
-      border: 1px solid var(--border); padding: 6px 12px; font-size: 13px;
+      border: 1px solid var(--border); padding: 6px 12px; font-size: 14px;
     }
     .btn-ghost:hover { border-color: var(--accent); color: var(--accent); }
 
@@ -122,7 +122,7 @@
     .tabs-row .tabs { border-bottom: none; margin-bottom: 0; }
     .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 24px; }
     .tab {
-      padding: 10px 22px; font-size: 14px; font-weight: 500;
+      padding: 10px 22px; font-size: 15px; font-weight: 500;
       color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent;
       margin-bottom: -1px; transition: all .15s; user-select: none;
     }
@@ -300,7 +300,10 @@
         </div>
       </div>
       <div class="form-group">
-        <label for="embModel">Embedding モデル</label>
+        <label for="embModel">Embedding モデル <span class="info-icon" style="font-size:10px;">ⓘ<span class="tooltip" style="width:300px;"><strong>モデル使い分け:</strong><br>
+• <strong>3-small</strong>（推奨）: 低コスト・高速。通常の一貫性チェックや比較に最適。<br>
+• <strong>3-large</strong>: 高精度。微妙なニュアンスや専門的な文書の差異を捉えたい場合に。3-smallの約6倍のコスト。<br>
+• <strong>ada-002</strong>: 旧世代モデル。既存システムとの後方互換用途のみ推奨。</span></span></label>
         <select id="embModel">
           <option value="text-embedding-3-small">text-embedding-3-small（推奨・低コスト）</option>
           <option value="text-embedding-3-large">text-embedding-3-large（高精度）</option>
@@ -907,6 +910,16 @@ function renderComparison(stA, stB, cSim, mw, nameA, nameB, showMW, gInfo) {
       </div>`;
   }
 
+  const mwInterpret = (showMW && mw) ? `
+    <div style="font-size:13px;line-height:1.6;padding:12px 16px;border-radius:6px;margin-top:12px;
+      background:${mw.significant?'rgba(62,207,142,.07)':'rgba(139,144,160,.07)'};
+      border:1px solid ${mw.significant?'rgba(62,207,142,.25)':'var(--border)'};">
+      <strong style="color:${mw.significant?'var(--success)':'var(--text2)'};">解釈:</strong>
+      ${mw.significant
+        ? `グループ内の類似度分布に統計的に有意な差が検出されました（p = ${mw.p.toFixed(4)}）。2つのモデルの出力一貫性は異なる可能性があります。`
+        : `グループ内の類似度分布に統計的に有意な差は検出されませんでした（p = ${mw.p.toFixed(4)}）。サンプル数が少ない場合は検出力が低いため、差がないとは言い切れません。`}
+    </div>` : '';
+
   container.innerHTML = `
     <div class="cmp-grid" style="${showMW?'':'grid-template-columns: repeat(2, 1fr);'}">
       <div class="cmp-card">
@@ -919,6 +932,7 @@ function renderComparison(stA, stB, cSim, mw, nameA, nameB, showMW, gInfo) {
         <div class="cmp-lbl">より一貫性が高いグループ<br><small>（平均類似度で判定）</small></div>
       </div>
     </div>
+    ${mwInterpret}
     ${goldenHtml}
     <div class="separator"></div>
     <div class="two-col">
