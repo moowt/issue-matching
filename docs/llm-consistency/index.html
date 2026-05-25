@@ -233,6 +233,27 @@
     .no-data { text-align: center; padding: 40px; color: var(--text2); font-size: 14px; }
     .hidden { display: none !important; }
 
+    /* Info tooltip */
+    .info-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--surface2); border: 1px solid var(--border);
+      font-size: 9px; color: var(--text2); cursor: default;
+      position: relative; vertical-align: middle; margin-left: 4px;
+      user-select: none; flex-shrink: 0;
+    }
+    .info-icon:hover { border-color: var(--accent); color: var(--accent); }
+    .info-icon .tooltip {
+      display: none; position: absolute; bottom: calc(100% + 6px); left: 50%;
+      transform: translateX(-50%); background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 8px 10px; font-size: 12px; color: var(--text);
+      white-space: normal; width: 260px; z-index: 100; line-height: 1.5;
+      box-shadow: 0 4px 12px rgba(0,0,0,.4); pointer-events: none;
+      text-align: left; font-weight: 400; letter-spacing: 0;
+    }
+    .info-icon:hover .tooltip { display: block; }
+
     .spinner {
       display: inline-block; width: 14px; height: 14px;
       border: 2px solid var(--border); border-top-color: var(--accent);
@@ -318,10 +339,6 @@
       <div id="listA" class="entry-list"></div>
       <div class="entry-footer">
         <button class="btn btn-ghost" onclick="addEntry('A')">+ 追加</button>
-        <label class="btn btn-ghost" style="cursor:pointer;">
-          <input type="file" style="display:none" accept=".json,.jsonl,.txt" onchange="bulkImport('A',this)">
-          一括インポート
-        </label>
         <span class="entry-count" id="countA">0 件</span>
       </div>
     </div>
@@ -339,10 +356,6 @@
       <div id="listB" class="entry-list"></div>
       <div class="entry-footer">
         <button class="btn btn-ghost" onclick="addEntry('B')">+ 追加</button>
-        <label class="btn btn-ghost" style="cursor:pointer;">
-          <input type="file" style="display:none" accept=".json,.jsonl,.txt" onchange="bulkImport('B',this)">
-          一括インポート
-        </label>
         <span class="entry-count" id="countB">0 件</span>
       </div>
     </div>
@@ -371,6 +384,7 @@
       <input type="checkbox" id="doMW">
       <span>
         A・B 間の Mann-Whitney U 検定を実施する
+        <span class="info-icon">ⓘ<span class="tooltip">Mann-Whitney U検定: 2グループの分布を比較するノンパラメトリック検定。正規分布を仮定せずサンプル数が少なくても使用できます。p &lt; 0.05 で有意差ありと判定します。</span></span>
         <span style="color:var(--text2);font-size:13px;">（各グループに 2 件以上必要）</span>
       </span>
     </label>
@@ -427,8 +441,16 @@
 function deepGet(obj, path) {
   let cur = obj;
   for (const k of path.trim().split('.')) {
-    if (cur == null || typeof cur !== 'object') return undefined;
-    cur = cur[k];
+    if (cur == null) return undefined;
+    if (Array.isArray(cur)) {
+      const mapped = cur.map(item => (item != null && typeof item === 'object') ? item[k] : undefined)
+                       .filter(v => v != null);
+      cur = mapped.length ? mapped : undefined;
+    } else if (typeof cur === 'object') {
+      cur = cur[k];
+    } else {
+      return undefined;
+    }
   }
   return cur;
 }
@@ -438,6 +460,13 @@ function flatStr(val) {
   if (Array.isArray(val)) return val.map(flatStr).join(' ');
   if (typeof val === 'object') return Object.values(val).map(flatStr).join(' ');
   return String(val);
+}
+
+function expandVals(val) {
+  if (val == null) return [''];
+  if (Array.isArray(val)) return val.flatMap(v => expandVals(v));
+  if (typeof val === 'object') return [JSON.stringify(val)];
+  return [String(val)];
 }
 
 function extractText(obj, keys) {
@@ -529,8 +558,14 @@ function leafKeys(obj, prefix='') {
   const out=[];
   for(const[k,v] of Object.entries(obj)){
     const fk=prefix?`${prefix}.${k}`:k;
-    if(v!==null&&typeof v==='object'&&!Array.isArray(v)) out.push(...leafKeys(v,fk));
-    else out.push(fk);
+    if(Array.isArray(v)){
+      if(v.length>0&&v[0]!=null&&typeof v[0]==='object') out.push(...leafKeys(v[0],fk));
+      else out.push(fk);
+    } else if(v!==null&&typeof v==='object'){
+      out.push(...leafKeys(v,fk));
+    } else {
+      out.push(fk);
+    }
   }
   return out;
 }
@@ -617,21 +652,6 @@ function getEntryValues(group) {
     .map(ta => ta.value.trim()).filter(Boolean);
 }
 
-function bulkImport(group, input) {
-  const file = input.files[0];
-  if (!file) return;
-  const reader = new FileReader();
-  reader.onload = e => {
-    try {
-      for (const json of parseInputs(e.target.result)) addEntry(group, json);
-    } catch(err) {
-      setMsg('globalMsg', `ファイル読み込みエラー: ${err.message}`, 'error');
-    }
-    input.value = '';
-  };
-  reader.readAsText(file);
-}
-
 // ─── Key detection ────────────────────────────────────────────────────────────
 
 function detectKeys() {
@@ -656,6 +676,19 @@ function toggleKey(key, el) {
   if (idx>=0){keys.splice(idx,1);el.classList.remove('sel');}
   else{keys.push(key);el.classList.add('sel');}
   inp.value = keys.join(', ');
+}
+
+// ─── Info tooltips ────────────────────────────────────────────────────────────
+
+function infoIcon(key) {
+  const tips = {
+    cosSim: 'コサイン類似度: 2つのベクトルのなす角度に基づく類似度（0〜1）。1に近いほど意味的に類似しています。',
+    centroid: 'セントロイド: グループ内の全Embeddingベクトルの平均ベクトル。グループの「代表ベクトル」として機能します。',
+    mw: 'Mann-Whitney U検定: 2グループの分布を比較するノンパラメトリック検定。正規分布を仮定せずサンプル数が少なくても使用できます。p &lt; 0.05 で有意差ありと判定します。',
+    std: '標準偏差: 値のばらつきを示す指標。小さいほどグループ内の出力が均一で一貫性が高いことを示します。',
+    stability: '安定性スコア: 同じプロンプトへの複数回出力の一致度をEmbedding類似度で定量化。1に近いほど出力が安定しています。',
+  };
+  return `<span class="info-icon">ⓘ<span class="tooltip">${tips[key]||''}</span></span>`;
 }
 
 // ─── Color scale ──────────────────────────────────────────────────────────────
@@ -775,10 +808,10 @@ function renderHeatmap(mat, nA, nB, nG) {
 function statCards(st, color) {
   if(!st) return '<div class="no-data" style="padding:20px;">（2件以上必要）</div>';
   return `<div class="stats-grid">
-    <div class="stat-card"><div class="stat-val" style="color:${color}">${st.mean.toFixed(4)}</div><div class="stat-lbl">平均類似度<br>（対角除く）</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:${color}">${st.mean.toFixed(4)}</div><div class="stat-lbl">平均類似度${infoIcon('stability')}<br>（対角除く）</div></div>
     <div class="stat-card"><div class="stat-val" style="color:${color}">${st.min.toFixed(4)}</div><div class="stat-lbl">最小類似度</div></div>
     <div class="stat-card"><div class="stat-val" style="color:${color}">${st.max.toFixed(4)}</div><div class="stat-lbl">最大類似度</div></div>
-    <div class="stat-card"><div class="stat-val" style="color:${color}">${st.std.toFixed(4)}</div><div class="stat-lbl">標準偏差</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:${color}">${st.std.toFixed(4)}</div><div class="stat-lbl">標準偏差${infoIcon('std')}</div></div>
   </div>`;
 }
 
@@ -836,7 +869,7 @@ function renderComparison(stA, stB, cSim, mw, nameA, nameB, showMW, gInfo) {
           ${mw.significant?'有意差あり (p < 0.05)':'有意差なし (p ≥ 0.05)'}
         </span>
         <div style="font-size:11px;color:var(--text2);margin-top:6px;">U = ${mw.U.toFixed(1)}, z = ${mw.z.toFixed(3)}</div>
-        <div class="cmp-lbl">Mann-Whitney U 検定<br><small>（各グループ内類似度分布を比較）</small></div>
+        <div class="cmp-lbl">Mann-Whitney U 検定${infoIcon('mw')}<br><small>（各グループ内類似度分布を比較）</small></div>
       </div>`;
   } else if (showMW && !mw) {
     mwHtml = `<div class="cmp-card"><div style="color:var(--text2);font-size:13px;">各グループに 2 件以上必要</div><div class="cmp-lbl">Mann-Whitney U 検定</div></div>`;
@@ -878,7 +911,7 @@ function renderComparison(stA, stB, cSim, mw, nameA, nameB, showMW, gInfo) {
     <div class="cmp-grid" style="${showMW?'':'grid-template-columns: repeat(2, 1fr);'}">
       <div class="cmp-card">
         <div class="cmp-val" style="color:var(--accent)">${cSim.toFixed(4)}</div>
-        <div class="cmp-lbl">セントロイド間 cos 類似度<br><small>${nameA} ↔ ${nameB}</small></div>
+        <div class="cmp-lbl">セントロイド間 cos 類似度${infoIcon('centroid')}${infoIcon('cosSim')}<br><small>${nameA} ↔ ${nameB}</small></div>
       </div>
       ${mwHtml}
       <div class="cmp-card">
@@ -946,8 +979,8 @@ function renderDistCharts(outsA, outsB, nameA, nameB, keys) {
   if (!keys?.length) keys = leafKeys(first);
   let rendered = 0;
   for (const key of keys) {
-    const vA = outsA.map(o=>flatStr(deepGet(o,key)));
-    const vB = outsB.map(o=>flatStr(deepGet(o,key)));
+    const vA = outsA.flatMap(o=>expandVals(deepGet(o,key)));
+    const vB = outsB.flatMap(o=>expandVals(deepGet(o,key)));
     const unique = [...new Set([...vA,...vB])].sort();
     if (unique.length > 20) continue;
     rendered++;
@@ -1256,21 +1289,9 @@ function generateMarkdown(r) {
   if (distKeys.length > 0 && (r.outsA.length > 0 || (r.outsB && r.outsB.length > 0))) {
     lines.push('## 分布分析', '');
 
-    const flatStr = v => {
-      if (v == null) return '';
-      if (typeof v === 'object') return JSON.stringify(v);
-      return String(v);
-    };
-    const deepGet = (obj, key) => {
-      const parts = key.split('.');
-      let cur = obj;
-      for (const p of parts) { if (cur == null) return undefined; cur = cur[p]; }
-      return cur;
-    };
-
     for (const key of distKeys) {
-      const vA = (r.outsA || []).map(o => flatStr(deepGet(o, key))).filter(Boolean);
-      const vB = (r.outsB || []).map(o => flatStr(deepGet(o, key))).filter(Boolean);
+      const vA = (r.outsA || []).flatMap(o => expandVals(deepGet(o, key))).filter(Boolean);
+      const vB = (r.outsB || []).flatMap(o => expandVals(deepGet(o, key))).filter(Boolean);
       const allVals = [...new Set([...vA, ...vB])].sort();
       if (!allVals.length) continue;
 
@@ -1307,6 +1328,18 @@ async function copyReport() {
 // Start with 3 entries for A, 0 for B, Golden textarea listens for key detection
 for(let i=0;i<3;i++) addEntry('A');
 document.getElementById('inputG').addEventListener('input', debouncedDetect);
+
+// Restore and persist API key via sessionStorage
+(function(){
+  const apiKeyEl = document.getElementById('apiKey');
+  const saved = sessionStorage.getItem('llm_apikey');
+  if(saved) apiKeyEl.value = saved;
+  apiKeyEl.addEventListener('input', () => {
+    const v = apiKeyEl.value;
+    if(v) sessionStorage.setItem('llm_apikey', v);
+    else sessionStorage.removeItem('llm_apikey');
+  });
+})();
 </script>
 </body>
 </html>
