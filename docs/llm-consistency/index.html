@@ -1342,18 +1342,6 @@ async function copyReport() {
 // Start with 3 entries for A, 0 for B, Golden textarea listens for key detection
 for(let i=0;i<3;i++) addEntry('A');
 document.getElementById('inputG').addEventListener('input', debouncedDetect);
-
-// Restore and persist API key via sessionStorage
-(function(){
-  const apiKeyEl = document.getElementById('apiKey');
-  const saved = sessionStorage.getItem('llm_apikey');
-  if(saved) apiKeyEl.value = saved;
-  apiKeyEl.addEventListener('input', () => {
-    const v = apiKeyEl.value;
-    if(v) sessionStorage.setItem('llm_apikey', v);
-    else sessionStorage.removeItem('llm_apikey');
-  });
-})();
 </script>
 </body>
 </html>
