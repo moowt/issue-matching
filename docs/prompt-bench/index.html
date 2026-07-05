@@ -1,0 +1,882 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prompt Bench — プロンプト再現性検証ツール</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #252836;
+      --border: #2d3148;
+      --text: #e4e6ef;
+      --text2: #8b90a0;
+      --accent: #5b8ef0;
+      --accent2: #7c6cf0;
+      --success: #3ecf8e;
+      --warning: #f5a623;
+      --danger: #f06060;
+      --r: 8px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    .container { max-width: 1200px; margin: 0 auto; padding: 24px 20px 60px; }
+
+    header {
+      text-align: center;
+      padding: 40px 0 28px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 28px;
+    }
+    header h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
+    header p  { color: var(--text2); font-size: 15px; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 13px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .07em;
+      color: var(--text2); margin-bottom: 16px;
+      display: flex; align-items: center; gap: 8px;
+    }
+    .card-note { font-size: 12px; color: var(--text2); margin-top: 4px; line-height: 1.5; }
+
+    label { display: block; font-size: 14px; color: var(--text2); margin-bottom: 5px; }
+    input[type="text"], input[type="password"], input[type="number"], input[type="url"], select, textarea {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); padding: 9px 12px;
+      font-size: 15px; font-family: inherit; outline: none; transition: border-color .2s;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+    select { cursor: pointer; }
+    textarea { font-family: 'Monaco','Menlo','Consolas',monospace; font-size: 13px; line-height: 1.5; resize: vertical; }
+
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .form-row3 { display: grid; grid-template-columns: 1fr 1fr 1fr 1fr; gap: 16px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group:last-child { margin-bottom: 0; }
+
+    .btn {
+      padding: 9px 18px; border-radius: 6px; font-size: 15px; font-weight: 600;
+      cursor: pointer; border: none; transition: all .15s;
+      display: inline-flex; align-items: center; gap: 5px;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #4a7de0; }
+    .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-danger { background: var(--danger); color: #fff; }
+    .btn-danger:hover:not(:disabled) { background: #d84d4d; }
+    .btn-danger:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-ghost {
+      background: transparent; color: var(--text2);
+      border: 1px solid var(--border); padding: 6px 12px; font-size: 14px;
+    }
+    .btn-ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+    .btn-ghost:disabled { opacity: .4; cursor: not-allowed; }
+
+    .option-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 10px 14px; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 6px; font-size: 14px;
+      margin-bottom: 12px;
+    }
+    .option-row input[type="checkbox"] { width: 15px; height: 15px; cursor: pointer; accent-color: var(--accent); flex-shrink: 0; }
+    .option-body { margin-top: 10px; padding-left: 4px; display: none; }
+    .option-body.open { display: block; }
+
+    .info-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--surface2); border: 1px solid var(--border);
+      font-size: 9px; color: var(--text2); cursor: default;
+      position: relative; vertical-align: middle; margin-left: 4px;
+      user-select: none; flex-shrink: 0;
+    }
+    .info-icon:hover { border-color: var(--accent); color: var(--accent); }
+    .info-icon .tooltip {
+      display: none; position: absolute; bottom: calc(100% + 6px); left: 50%;
+      transform: translateX(-50%); background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 8px 10px; font-size: 12px; color: var(--text);
+      white-space: normal; width: 260px; z-index: 100; line-height: 1.5;
+      box-shadow: 0 4px 12px rgba(0,0,0,.4); pointer-events: none;
+      text-align: left; font-weight: 400; letter-spacing: 0;
+    }
+    .info-icon:hover .tooltip { display: block; }
+
+    .run-controls { text-align: center; margin: 24px 0 18px; display: flex; gap: 10px; justify-content: center; }
+    .progress-bar { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 10px; }
+    .progress-fill {
+      height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 2px; transition: width .25s ease;
+    }
+
+    .status { padding: 11px 15px; border-radius: 6px; font-size: 14px; margin: 10px 0; }
+    .status-info    { background: rgba(91,142,240,.1);  border: 1px solid rgba(91,142,240,.3);  color: var(--accent); }
+    .status-success { background: rgba(62,207,142,.1);  border: 1px solid rgba(62,207,142,.3);  color: var(--success); }
+    .status-error   { background: rgba(240,96,96,.1);   border: 1px solid rgba(240,96,96,.3);   color: var(--danger); }
+    .status-warn    { background: rgba(245,166,35,.1);  border: 1px solid rgba(245,166,35,.3);  color: var(--warning); }
+
+    .stats-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 10px; margin-bottom: 20px; }
+    .stat-card {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 13px; text-align: center;
+    }
+    .stat-val { font-size: 21px; font-weight: 700; color: var(--accent); }
+    .stat-lbl { font-size: 11px; color: var(--text2); margin-top: 3px; line-height: 1.3; }
+
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 20px; }
+    .chart-wrap { position: relative; }
+
+    .run-card {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 14px 16px; margin-bottom: 10px;
+    }
+    .run-card.error { border-color: rgba(240,96,96,.4); }
+    .run-head {
+      display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+      margin-bottom: 8px; font-size: 12px; color: var(--text2);
+    }
+    .run-idx { font-family: monospace; font-weight: 700; color: var(--text); font-size: 13px; }
+    .run-meta-chip {
+      background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+      padding: 2px 9px; font-size: 11px; font-family: monospace;
+    }
+    .run-out {
+      white-space: pre-wrap; word-break: break-word; font-size: 13px;
+      font-family: 'Monaco','Menlo','Consolas',monospace; line-height: 1.6;
+      max-height: 260px; overflow-y: auto; background: var(--surface);
+      border: 1px solid var(--border); border-radius: 6px; padding: 10px 12px;
+    }
+    .judge-box {
+      margin-top: 10px; padding: 8px 12px; border-radius: 6px; font-size: 13px;
+      background: rgba(124,108,240,.08); border: 1px solid rgba(124,108,240,.25);
+    }
+    .judge-score { font-weight: 700; color: var(--accent2); }
+    .spinner {
+      display: inline-block; width: 14px; height: 14px;
+      border: 2px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .hm-wrap { overflow-x: auto; padding-bottom: 4px; margin-top: 10px; }
+    .hm-grid {
+      display: inline-grid; gap: 2px;
+      padding: 8px; background: var(--surface2);
+      border-radius: 6px; border: 1px solid var(--border);
+    }
+    .hm-cell {
+      border-radius: 3px; display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 600; font-family: monospace;
+    }
+    .hm-lbl {
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 700; font-family: monospace; color: var(--text2);
+    }
+
+    .separator { height: 1px; background: var(--border); margin: 20px 0; }
+    .hidden { display: none !important; }
+    .tag-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .tag { font-size: 11px; padding: 2px 8px; border-radius: 10px; background: var(--surface2); border: 1px solid var(--border); color: var(--text2); cursor: pointer; }
+    .tag:hover { border-color: var(--accent); color: var(--accent); }
+
+    @media (max-width: 900px) {
+      .form-row, .form-row3, .two-col { grid-template-columns: 1fr; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>Prompt Bench</h1>
+    <p>システムプロンプト・ユーザープロンプト・パラメータを固定してN回繰り返し実行し、出力のばらつきを検証する</p>
+  </header>
+
+  <!-- Execution API -->
+  <div class="card">
+    <div class="card-title">実行API設定（OpenAI互換）</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="baseUrl">Base URL</label>
+        <input type="url" id="baseUrl" value="https://api.groq.com/openai/v1">
+      </div>
+      <div class="form-group">
+        <label for="apiKey">API キー</label>
+        <input type="password" id="apiKey" placeholder="gsk_..." autocomplete="off">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="modelInput">
+          モデル
+          <span class="info-icon">ⓘ<span class="tooltip">デフォルトはGroqでホストされる openai/gpt-oss-120b。「一覧取得」でアカウントが利用可能な全モデルIDを取得し、下の候補一覧を更新します。候補になくても直接入力可能です。</span></span>
+        </label>
+        <input type="text" id="modelInput" list="modelList" value="openai/gpt-oss-120b">
+        <datalist id="modelList">
+          <option value="openai/gpt-oss-120b">
+          <option value="openai/gpt-oss-20b">
+          <option value="llama-3.3-70b-versatile">
+          <option value="llama-3.1-8b-instant">
+        </datalist>
+      </div>
+      <div class="form-group" style="display:flex; align-items:flex-end;">
+        <button class="btn btn-ghost" id="fetchModelsBtn" onclick="fetchModels()">モデル一覧を取得</button>
+      </div>
+    </div>
+    <div class="card-note">
+      APIキーはJS変数（メモリ上）にのみ保持し、ページを閉じると消去されます。localStorage等への保存は行いません。
+      ブラウザから直接APIへリクエストするため、Origin制限のあるプロバイダでは失敗する場合があります（実行時にCORSエラーの案内を表示します）。
+    </div>
+  </div>
+
+  <!-- Prompts -->
+  <div class="card">
+    <div class="card-title">プロンプト</div>
+    <div class="form-group">
+      <label for="systemPrompt">システムプロンプト（任意）</label>
+      <textarea id="systemPrompt" rows="4" placeholder="あなたは...です。"></textarea>
+    </div>
+    <div class="form-group">
+      <label for="userPrompt">ユーザープロンプト</label>
+      <textarea id="userPrompt" rows="6" placeholder="ここに固定のユーザープロンプトを入力"></textarea>
+    </div>
+  </div>
+
+  <!-- Parameters -->
+  <div class="card">
+    <div class="card-title">パラメータ</div>
+    <div class="form-row3">
+      <div class="form-group">
+        <label for="temperature">temperature</label>
+        <input type="number" id="temperature" value="1" min="0" max="2" step="0.05">
+      </div>
+      <div class="form-group">
+        <label for="topP">top_p</label>
+        <input type="number" id="topP" value="1" min="0" max="1" step="0.05">
+      </div>
+      <div class="form-group">
+        <label for="maxTokens">max_tokens</label>
+        <input type="number" id="maxTokens" value="1024" min="1" max="32768" step="1">
+      </div>
+      <div class="form-group">
+        <label for="repeatN">
+          繰り返し回数
+          <span class="info-icon">ⓘ<span class="tooltip">同一条件でchat completionsをN回呼び出します。1〜30回。</span></span>
+        </label>
+        <input type="number" id="repeatN" value="5" min="1" max="30" step="1">
+      </div>
+    </div>
+    <div class="form-group" style="max-width:240px;">
+      <label for="concurrency">
+        同時実行数
+        <span class="info-icon">ⓘ<span class="tooltip">レート制限を考慮し、1〜3件までの同時実行に制限しています。無料枠を使う場合は1（逐次）を推奨します。</span></span>
+      </label>
+      <input type="number" id="concurrency" value="1" min="1" max="3" step="1">
+    </div>
+  </div>
+
+  <!-- Evaluation options -->
+  <div class="card">
+    <div class="card-title">評価オプション（任意）</div>
+
+    <label class="option-row">
+      <input type="checkbox" id="judgeEnabled" onchange="toggleOption('judge')">
+      <span>LLM-as-Judge で各出力を採点する</span>
+    </label>
+    <div class="option-body" id="judgeBody">
+      <div class="form-group">
+        <label for="rubric">採点基準（rubric）</label>
+        <textarea id="rubric" rows="3" placeholder="例: 指示への忠実さ・簡潔さ・事実の正確さを重視して1〜10点で採点してください">指示への忠実さ、論理的整合性、簡潔さを基準に1〜10点で採点してください。</textarea>
+      </div>
+      <div class="form-group" style="max-width:360px;">
+        <label for="judgeModel">Judgeモデル（空欄なら実行モデルと同じ）</label>
+        <input type="text" id="judgeModel" list="modelList" placeholder="openai/gpt-oss-120b">
+      </div>
+    </div>
+
+    <label class="option-row">
+      <input type="checkbox" id="embEnabled" onchange="toggleOption('emb')">
+      <span>Embedding類似度でばらつきを定量評価する</span>
+    </label>
+    <div class="option-body" id="embBody">
+      <div class="card-note" style="margin-bottom:10px;">
+        Groq APIは現時点でembeddingsエンドポイントを提供していないため、embeddingは別のOpenAI互換プロバイダを指定してください（デフォルトはOpenAI）。
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="embBaseUrl">Embedding Base URL</label>
+          <input type="url" id="embBaseUrl" value="https://api.openai.com/v1">
+        </div>
+        <div class="form-group">
+          <label for="embApiKey">Embedding API キー</label>
+          <input type="password" id="embApiKey" placeholder="sk-..." autocomplete="off">
+        </div>
+      </div>
+      <div class="form-group" style="max-width:360px;">
+        <label for="embModel">Embedding モデル</label>
+        <input type="text" id="embModel" value="text-embedding-3-small">
+      </div>
+    </div>
+  </div>
+
+  <!-- Run controls -->
+  <div class="run-controls">
+    <button class="btn btn-primary" id="runBtn" onclick="runBench()" style="padding:13px 40px;font-size:16px;">実行</button>
+    <button class="btn btn-danger hidden" id="stopBtn" onclick="stopBench()" style="padding:13px 28px;font-size:16px;">停止</button>
+  </div>
+  <div id="progWrap" class="hidden" style="max-width:480px;margin:0 auto 18px;">
+    <div id="progText" style="font-size:13px;color:var(--text2);margin-bottom:5px;text-align:center;"></div>
+    <div class="progress-bar"><div class="progress-fill" id="progFill" style="width:0%"></div></div>
+  </div>
+
+  <div id="globalMsg"></div>
+
+  <!-- Results -->
+  <div id="results" class="hidden">
+    <div class="card">
+      <div class="card-title">サマリー</div>
+      <div class="stats-grid" id="summaryStats"></div>
+      <div class="two-col" id="chartsRow">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--text2);margin-bottom:10px;">レイテンシ推移 (ms)</div>
+          <div class="chart-wrap"><canvas id="chartLatency"></canvas></div>
+        </div>
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--text2);margin-bottom:10px;">出力トークン数推移</div>
+          <div class="chart-wrap"><canvas id="chartTokens"></canvas></div>
+        </div>
+      </div>
+      <div class="two-col hidden" id="judgeChartRow">
+        <div>
+          <div style="font-size:13px;font-weight:600;color:var(--text2);margin-bottom:10px;">Judgeスコア推移</div>
+          <div class="chart-wrap"><canvas id="chartJudge"></canvas></div>
+        </div>
+        <div></div>
+      </div>
+      <div id="embSection" class="hidden">
+        <div class="separator"></div>
+        <div style="font-size:13px;font-weight:600;color:var(--text2);margin-bottom:8px;">Embedding類似度（全ペア）</div>
+        <div class="hm-wrap"><div id="hmGrid" class="hm-grid"></div></div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title" style="justify-content:space-between;">
+        <span>各実行の結果</span>
+        <button class="btn btn-ghost" onclick="exportJSON()" style="font-size:12px;padding:5px 14px;">JSONエクスポート</button>
+      </div>
+      <div id="runList"></div>
+    </div>
+  </div>
+
+</div>
+<script>
+// ─── State ──────────────────────────────────────────────────────────────────
+
+let stopRequested = false;
+let activeControllers = new Set();
+let runs = []; // { index, output, error, latencyMs, usage, judge, embVec }
+
+// ─── Utilities ──────────────────────────────────────────────────────────────
+
+function setMsg(msg, type) {
+  document.getElementById('globalMsg').innerHTML = msg ? `<div class="status status-${type}">${msg}</div>` : '';
+}
+
+function setProgress(pct, text) {
+  document.getElementById('progFill').style.width = pct + '%';
+  document.getElementById('progText').textContent = text;
+}
+
+function escapeHtml(s) {
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function toggleOption(name) {
+  const enabled = document.getElementById(name + 'Enabled').checked;
+  document.getElementById(name + 'Body').classList.toggle('open', enabled);
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+function cosSim(a, b) {
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { dot += a[i]*b[i]; na += a[i]*a[i]; nb += b[i]*b[i]; }
+  const d = Math.sqrt(na) * Math.sqrt(nb);
+  return d === 0 ? 0 : dot / d;
+}
+
+function mean(arr) { return arr.length ? arr.reduce((s,v)=>s+v,0)/arr.length : 0; }
+function stdDev(arr) { const m = mean(arr); return Math.sqrt(mean(arr.map(v=>(v-m)**2))); }
+
+// ─── API calls ──────────────────────────────────────────────────────────────
+
+function normalizeBase(url) { return url.trim().replace(/\/+$/, ''); }
+
+async function fetchModels() {
+  const baseUrl = normalizeBase(document.getElementById('baseUrl').value);
+  const apiKey = document.getElementById('apiKey').value.trim();
+  if (!apiKey) return setMsg('APIキーを入力してください', 'error');
+  const btn = document.getElementById('fetchModelsBtn');
+  btn.disabled = true;
+  const orig = btn.textContent;
+  btn.innerHTML = '<span class="spinner"></span> 取得中…';
+  try {
+    const r = await fetch(`${baseUrl}/models`, { headers: { 'Authorization': `Bearer ${apiKey}` } });
+    if (!r.ok) throw new Error(`API ${r.status}: ${r.statusText}`);
+    const data = await r.json();
+    const ids = (data.data || []).map(m => m.id).sort();
+    if (!ids.length) throw new Error('モデルが見つかりませんでした');
+    const dl = document.getElementById('modelList');
+    dl.innerHTML = ids.map(id => `<option value="${escapeHtml(id)}">`).join('');
+    setMsg(`${ids.length} 件のモデルを取得しました`, 'success');
+  } catch (e) {
+    setMsg(`モデル取得エラー: ${describeError(e)}`, 'error');
+  } finally {
+    btn.disabled = false;
+    btn.textContent = orig;
+  }
+}
+
+function describeError(e) {
+  if (e instanceof TypeError) {
+    return `${e.message}（CORSブロックまたはネットワークエラーの可能性があります。プロバイダがブラウザからの直接リクエストを許可していない場合、プロキシ経由での呼び出しが必要です）`;
+  }
+  return e.message || String(e);
+}
+
+async function chatCompletion(baseUrl, apiKey, model, messages, params, signal) {
+  const maxRetries = 5;
+  let attempt = 0;
+  while (true) {
+    const start = performance.now();
+    let r;
+    try {
+      r = await fetch(`${baseUrl}/chat/completions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+        body: JSON.stringify({ model, messages, temperature: params.temperature, top_p: params.topP, max_tokens: params.maxTokens }),
+        signal,
+      });
+    } catch (e) {
+      if (e.name === 'AbortError') throw e;
+      throw new TypeError(e.message);
+    }
+    if (r.status === 429 && attempt < maxRetries) {
+      const retryAfter = parseFloat(r.headers.get('retry-after'));
+      const waitMs = !isNaN(retryAfter) ? retryAfter * 1000 : 2000 * Math.pow(2, attempt);
+      attempt++;
+      await sleep(waitMs);
+      continue;
+    }
+    const latencyMs = performance.now() - start;
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      throw new Error(`API ${r.status}: ${e.error?.message || r.statusText}`);
+    }
+    const data = await r.json();
+    return {
+      content: data.choices?.[0]?.message?.content ?? '',
+      finishReason: data.choices?.[0]?.finish_reason ?? null,
+      usage: data.usage ?? null,
+      latencyMs,
+    };
+  }
+}
+
+async function embedTexts(baseUrl, apiKey, model, texts) {
+  const r = await fetch(`${normalizeBase(baseUrl)}/embeddings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, input: texts }),
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(`API ${r.status}: ${e.error?.message || r.statusText}`);
+  }
+  const data = await r.json();
+  return data.data.sort((a,b) => a.index - b.index).map(d => d.embedding);
+}
+
+function parseJudgeJson(text) {
+  try { return JSON.parse(text); } catch {}
+  const m = text.match(/\{[\s\S]*\}/);
+  if (m) { try { return JSON.parse(m[0]); } catch {} }
+  return null;
+}
+
+async function judgeRun(baseUrl, apiKey, model, rubric, systemPrompt, userPrompt, output, signal) {
+  const judgeMessages = [
+    { role: 'system', content: 'あなたは公平で厳格な評価者です。与えられた採点基準に従い出力を1〜10点の整数で採点し、必ず次のJSON形式のみで回答してください。他のテキストは含めないでください。\n{"score": <1-10の整数>, "reason": "<日本語で60字程度の理由>"}' },
+    { role: 'user', content: `【採点基準】\n${rubric}\n\n【元のシステムプロンプト】\n${systemPrompt || '(なし)'}\n\n【元のユーザープロンプト】\n${userPrompt}\n\n【評価対象の出力】\n${output}` },
+  ];
+  const res = await chatCompletion(baseUrl, apiKey, model, judgeMessages, { temperature: 0, topP: 1, maxTokens: 300 }, signal);
+  const parsed = parseJudgeJson(res.content);
+  if (!parsed || typeof parsed.score !== 'number') {
+    return { score: null, reason: null, raw: res.content, error: 'JSON解析に失敗しました' };
+  }
+  return { score: parsed.score, reason: parsed.reason ?? '', raw: res.content };
+}
+
+// ─── Concurrency-limited pool ───────────────────────────────────────────────
+
+async function runPool(n, worker, concurrency) {
+  let idx = 0;
+  async function next() {
+    while (idx < n && !stopRequested) {
+      const i = idx++;
+      await worker(i);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, n) }, next));
+}
+
+// ─── Main run ───────────────────────────────────────────────────────────────
+
+function stopBench() {
+  stopRequested = true;
+  activeControllers.forEach(c => c.abort());
+  setMsg('停止をリクエストしました。実行中のリクエストが終わり次第停止します。', 'warn');
+}
+
+async function runBench() {
+  const baseUrl = normalizeBase(document.getElementById('baseUrl').value);
+  const apiKey = document.getElementById('apiKey').value.trim();
+  const model = document.getElementById('modelInput').value.trim();
+  const systemPrompt = document.getElementById('systemPrompt').value;
+  const userPrompt = document.getElementById('userPrompt').value.trim();
+  const params = {
+    temperature: parseFloat(document.getElementById('temperature').value),
+    topP: parseFloat(document.getElementById('topP').value),
+    maxTokens: parseInt(document.getElementById('maxTokens').value, 10),
+  };
+  const n = Math.max(1, Math.min(30, parseInt(document.getElementById('repeatN').value, 10) || 1));
+  const concurrency = Math.max(1, Math.min(3, parseInt(document.getElementById('concurrency').value, 10) || 1));
+
+  const judgeEnabled = document.getElementById('judgeEnabled').checked;
+  const rubric = document.getElementById('rubric').value.trim();
+  const judgeModel = document.getElementById('judgeModel').value.trim() || model;
+
+  const embEnabled = document.getElementById('embEnabled').checked;
+  const embBaseUrl = document.getElementById('embBaseUrl').value.trim();
+  const embApiKey = document.getElementById('embApiKey').value.trim();
+  const embModel = document.getElementById('embModel').value.trim();
+
+  if (!apiKey) return setMsg('APIキーを入力してください', 'error');
+  if (!model) return setMsg('モデルを指定してください', 'error');
+  if (!userPrompt) return setMsg('ユーザープロンプトを入力してください', 'error');
+  if (judgeEnabled && !rubric) return setMsg('LLM-as-Judgeを有効にする場合は採点基準を入力してください', 'error');
+  if (embEnabled && (!embApiKey || !embModel)) return setMsg('Embeddingを有効にする場合はEmbedding APIキーとモデルを入力してください', 'error');
+
+  stopRequested = false;
+  activeControllers = new Set();
+  runs = new Array(n).fill(null).map((_, i) => ({ index: i, output: null, error: null, latencyMs: null, usage: null, judge: null }));
+
+  setMsg('', 'info');
+  document.getElementById('runBtn').disabled = true;
+  document.getElementById('stopBtn').classList.remove('hidden');
+  document.getElementById('progWrap').classList.remove('hidden');
+  document.getElementById('results').classList.add('hidden');
+  renderRunListSkeleton(n);
+
+  const messages = [];
+  if (systemPrompt.trim()) messages.push({ role: 'system', content: systemPrompt });
+  messages.push({ role: 'user', content: userPrompt });
+
+  let completed = 0;
+  const totalSteps = n * (1 + (judgeEnabled ? 1 : 0));
+  const updateProgress = (label) => setProgress(Math.min(99, (completed/totalSteps)*100), label);
+
+  try {
+    await runPool(n, async (i) => {
+      const controller = new AbortController();
+      activeControllers.add(controller);
+      try {
+        const res = await chatCompletion(baseUrl, apiKey, model, messages, params, controller.signal);
+        runs[i].output = res.content;
+        runs[i].finishReason = res.finishReason;
+        runs[i].latencyMs = res.latencyMs;
+        runs[i].usage = res.usage;
+      } catch (e) {
+        if (e.name === 'AbortError') { runs[i].error = '停止されました'; }
+        else { runs[i].error = describeError(e); }
+      }
+      activeControllers.delete(controller);
+      completed++;
+      updateProgress(`実行 ${Math.min(completed, n)}/${n} 完了`);
+      renderRunCard(i);
+
+      if (!stopRequested && judgeEnabled && runs[i].output != null) {
+        try {
+          runs[i].judge = await judgeRun(baseUrl, apiKey, judgeModel, rubric, systemPrompt, userPrompt, runs[i].output, controller.signal);
+        } catch (e) {
+          runs[i].judge = { score: null, reason: null, error: describeError(e) };
+        }
+        completed++;
+        updateProgress(`採点中… ${i+1}件目`);
+        renderRunCard(i);
+      }
+    }, concurrency);
+
+    if (embEnabled && !stopRequested) {
+      const successfulRuns = runs.filter(r => r.output != null);
+      if (successfulRuns.length >= 2) {
+        setProgress(99, 'Embedding計算中…');
+        try {
+          const vecs = await embedTexts(embBaseUrl, embApiKey, embModel, successfulRuns.map(r => r.output));
+          successfulRuns.forEach((r, k) => { r.embVec = vecs[k]; });
+        } catch (e) {
+          setMsg(`Embedding計算エラー: ${describeError(e)}`, 'error');
+        }
+      }
+    }
+
+    setProgress(100, stopRequested ? '停止しました' : '完了');
+    renderSummary(n, judgeEnabled, embEnabled);
+    document.getElementById('results').classList.remove('hidden');
+  } finally {
+    document.getElementById('runBtn').disabled = false;
+    document.getElementById('stopBtn').classList.add('hidden');
+  }
+}
+
+// ─── Rendering ──────────────────────────────────────────────────────────────
+
+function renderRunListSkeleton(n) {
+  const list = document.getElementById('runList');
+  list.innerHTML = '';
+  for (let i = 0; i < n; i++) {
+    const div = document.createElement('div');
+    div.className = 'run-card';
+    div.id = 'run_' + i;
+    div.innerHTML = `<div class="run-head"><span class="run-idx">#${i+1}</span><span class="spinner"></span> 実行待ち…</div>`;
+    list.appendChild(div);
+  }
+}
+
+function renderRunCard(i) {
+  const r = runs[i];
+  const el = document.getElementById('run_' + i);
+  if (!el) return;
+
+  if (r.error) {
+    el.classList.add('error');
+    el.innerHTML = `<div class="run-head"><span class="run-idx">#${i+1}</span><span class="run-meta-chip" style="color:var(--danger);">エラー</span></div>
+      <div class="run-out" style="color:var(--danger);">${escapeHtml(r.error)}</div>`;
+    return;
+  }
+
+  const u = r.usage || {};
+  const chips = [
+    `<span class="run-meta-chip">${r.latencyMs != null ? Math.round(r.latencyMs) + ' ms' : '-'}</span>`,
+    `<span class="run-meta-chip">prompt:${u.prompt_tokens ?? '-'} / completion:${u.completion_tokens ?? '-'} / total:${u.total_tokens ?? '-'}</span>`,
+    r.finishReason ? `<span class="run-meta-chip">finish:${escapeHtml(r.finishReason)}</span>` : '',
+  ].join('');
+
+  let judgeHtml = '';
+  if (r.judge) {
+    if (r.judge.error) {
+      judgeHtml = `<div class="judge-box" style="color:var(--danger);">Judgeエラー: ${escapeHtml(r.judge.error)}</div>`;
+    } else if (r.judge.score != null) {
+      judgeHtml = `<div class="judge-box"><span class="judge-score">${r.judge.score} / 10</span> — ${escapeHtml(r.judge.reason || '')}</div>`;
+    }
+  } else if (document.getElementById('judgeEnabled').checked && r.output != null) {
+    judgeHtml = `<div class="judge-box"><span class="spinner"></span> 採点中…</div>`;
+  }
+
+  el.innerHTML = `
+    <div class="run-head"><span class="run-idx">#${i+1}</span>${chips}</div>
+    <div class="run-out">${escapeHtml(r.output ?? '')}</div>
+    ${judgeHtml}`;
+}
+
+function renderSummary(n, judgeEnabled, embEnabled) {
+  const ok = runs.filter(r => r.output != null);
+  const latencies = ok.map(r => r.latencyMs).filter(v => v != null);
+  const completionTokens = ok.map(r => r.usage?.completion_tokens).filter(v => v != null);
+  const scores = ok.map(r => r.judge?.score).filter(v => typeof v === 'number');
+
+  const cards = [
+    { val: `${ok.length}/${n}`, lbl: '成功 / 総実行数' },
+    { val: latencies.length ? Math.round(mean(latencies)) + ' ms' : '-', lbl: '平均レイテンシ' },
+    { val: completionTokens.length ? Math.round(mean(completionTokens)) : '-', lbl: '平均出力トークン数' },
+  ];
+  if (judgeEnabled) cards.push({ val: scores.length ? mean(scores).toFixed(2) : '-', lbl: 'Judge平均スコア' });
+  if (embEnabled) {
+    const vecs = ok.map(r => r.embVec).filter(Boolean);
+    let simMean = '-';
+    if (vecs.length >= 2) {
+      const sims = [];
+      for (let i = 0; i < vecs.length; i++) for (let j = i+1; j < vecs.length; j++) sims.push(cosSim(vecs[i], vecs[j]));
+      simMean = mean(sims).toFixed(4);
+    }
+    cards.push({ val: simMean, lbl: 'Embedding平均類似度' });
+  }
+  document.getElementById('summaryStats').innerHTML = cards.map(c =>
+    `<div class="stat-card"><div class="stat-val">${c.val}</div><div class="stat-lbl">${c.lbl}</div></div>`).join('');
+  document.getElementById('summaryStats').parentElement.querySelector('.stats-grid').style.gridTemplateColumns = `repeat(${cards.length}, 1fr)`;
+
+  renderCharts(ok, judgeEnabled);
+
+  if (typeof Chart !== 'undefined') {
+    document.getElementById('judgeChartRow').classList.toggle('hidden', !judgeEnabled || !scores.length);
+  }
+
+  if (embEnabled) {
+    const vecs = ok.map(r => r.embVec).filter(Boolean);
+    document.getElementById('embSection').classList.toggle('hidden', vecs.length < 2);
+    if (vecs.length >= 2) renderHeatmap(vecs);
+  } else {
+    document.getElementById('embSection').classList.add('hidden');
+  }
+}
+
+const charts = {};
+function destroyChart(id) { if (charts[id]) { charts[id].destroy(); delete charts[id]; } }
+const DK = { color: '#8b90a0', grid: '#2d3148' };
+
+function renderCharts(ok, judgeEnabled) {
+  if (typeof Chart === 'undefined') {
+    document.getElementById('chartsRow').classList.add('hidden');
+    document.getElementById('judgeChartRow').classList.add('hidden');
+    return;
+  }
+  const labels = ok.map(r => `#${r.index+1}`);
+  destroyChart('chartLatency');
+  charts.chartLatency = new Chart(document.getElementById('chartLatency').getContext('2d'), {
+    type: 'bar',
+    data: { labels, datasets: [{ label: 'レイテンシ (ms)', data: ok.map(r => Math.round(r.latencyMs)), backgroundColor: 'rgba(91,142,240,.7)', borderColor: '#5b8ef0', borderWidth: 1 }] },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: DK.color }, grid: { color: DK.grid } }, y: { ticks: { color: DK.color }, grid: { color: DK.grid } } } },
+  });
+
+  destroyChart('chartTokens');
+  charts.chartTokens = new Chart(document.getElementById('chartTokens').getContext('2d'), {
+    type: 'bar',
+    data: { labels, datasets: [{ label: '出力トークン数', data: ok.map(r => r.usage?.completion_tokens ?? 0), backgroundColor: 'rgba(124,108,240,.7)', borderColor: '#7c6cf0', borderWidth: 1 }] },
+    options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: DK.color }, grid: { color: DK.grid } }, y: { ticks: { color: DK.color }, grid: { color: DK.grid } } } },
+  });
+
+  if (judgeEnabled) {
+    const scored = ok.filter(r => typeof r.judge?.score === 'number');
+    if (scored.length) {
+      destroyChart('chartJudge');
+      charts.chartJudge = new Chart(document.getElementById('chartJudge').getContext('2d'), {
+        type: 'bar',
+        data: { labels: scored.map(r => `#${r.index+1}`), datasets: [{ label: 'Judgeスコア', data: scored.map(r => r.judge.score), backgroundColor: 'rgba(62,207,142,.7)', borderColor: '#3ecf8e', borderWidth: 1 }] },
+        options: { responsive: true, plugins: { legend: { display: false } }, scales: { x: { ticks: { color: DK.color }, grid: { color: DK.grid } }, y: { min: 0, max: 10, ticks: { color: DK.color }, grid: { color: DK.grid } } } },
+      });
+    }
+  }
+}
+
+function simColor(v, lo, hi) {
+  const t = hi === lo ? 1 : Math.max(0, Math.min(1, (v-lo)/(hi-lo)));
+  const r = Math.round(247-t*239), g = Math.round(251-t*203), b = Math.round(255-t*148);
+  return { bg: `rgb(${r},${g},${b})`, text: t > .55 ? '#fff' : '#1a1d27' };
+}
+
+function renderHeatmap(vecs) {
+  const n = vecs.length;
+  const mat = Array.from({length:n}, (_,i) => Array.from({length:n}, (_,j) => cosSim(vecs[i], vecs[j])));
+  const container = document.getElementById('hmGrid');
+  container.innerHTML = '';
+  const CELL = n <= 10 ? 36 : n <= 20 ? 28 : 22;
+  const LBL = 26;
+  container.style.gridTemplateColumns = `${LBL}px repeat(${n}, ${CELL}px)`;
+  container.style.gridTemplateRows = `${LBL}px repeat(${n}, ${CELL}px)`;
+
+  let lo = Infinity, hi = -Infinity;
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (i !== j) { lo = Math.min(lo, mat[i][j]); hi = Math.max(hi, mat[i][j]); }
+  if (!isFinite(lo)) { lo = 0; hi = 1; }
+
+  const corner = document.createElement('div');
+  corner.style.width = LBL+'px'; corner.style.height = LBL+'px';
+  container.appendChild(corner);
+
+  for (let j = 0; j < n; j++) {
+    const d = document.createElement('div');
+    d.className = 'hm-lbl';
+    d.style.cssText = `width:${CELL}px;height:${LBL}px;`;
+    d.textContent = `#${j+1}`;
+    container.appendChild(d);
+  }
+  for (let i = 0; i < n; i++) {
+    const rl = document.createElement('div');
+    rl.className = 'hm-lbl';
+    rl.style.cssText = `width:${LBL}px;height:${CELL}px;`;
+    rl.textContent = `#${i+1}`;
+    container.appendChild(rl);
+    for (let j = 0; j < n; j++) {
+      const cell = document.createElement('div');
+      cell.style.width = CELL+'px'; cell.style.height = CELL+'px';
+      cell.className = 'hm-cell';
+      if (i === j) {
+        cell.style.cssText += 'background:#1e2d4e;color:var(--accent);';
+        cell.textContent = '1.00';
+      } else {
+        const c = simColor(mat[i][j], lo, hi);
+        cell.style.cssText += `background:${c.bg};color:${c.text};`;
+        cell.textContent = CELL >= 28 ? mat[i][j].toFixed(2) : '';
+      }
+      cell.title = `#${i+1} × #${j+1}: ${mat[i][j].toFixed(4)}`;
+      container.appendChild(cell);
+    }
+  }
+}
+
+// ─── Export ─────────────────────────────────────────────────────────────────
+
+function exportJSON() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    config: {
+      baseUrl: document.getElementById('baseUrl').value,
+      model: document.getElementById('modelInput').value,
+      systemPrompt: document.getElementById('systemPrompt').value,
+      userPrompt: document.getElementById('userPrompt').value,
+      temperature: parseFloat(document.getElementById('temperature').value),
+      topP: parseFloat(document.getElementById('topP').value),
+      maxTokens: parseInt(document.getElementById('maxTokens').value, 10),
+      repeatN: parseInt(document.getElementById('repeatN').value, 10),
+      concurrency: parseInt(document.getElementById('concurrency').value, 10),
+      judgeEnabled: document.getElementById('judgeEnabled').checked,
+      rubric: document.getElementById('rubric').value,
+      embEnabled: document.getElementById('embEnabled').checked,
+      embModel: document.getElementById('embModel').value,
+    },
+    runs: runs.map(r => ({
+      index: r.index, output: r.output, error: r.error, latencyMs: r.latencyMs,
+      usage: r.usage, finishReason: r.finishReason, judge: r.judge,
+    })),
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `prompt-bench-${new Date().toISOString().replace(/[:.]/g,'-')}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
