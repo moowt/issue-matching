@@ -302,9 +302,9 @@
     <div class="form-group" style="max-width:240px;">
       <label for="concurrency">
         同時実行数
-        <span class="info-icon">ⓘ<span class="tooltip">レート制限を考慮し、1〜3件までの同時実行に制限しています。無料枠を使う場合は1（逐次）を推奨します。</span></span>
+        <span class="info-icon">ⓘ<span class="tooltip">API側の制限ではなく本ツール側の上限です（暴走防止のため1〜10）。429エラー時は自動でリトライ・待機しますが、無料枠やレート制限が厳しいプロバイダでは1〜3程度を推奨します。</span></span>
       </label>
-      <input type="number" id="concurrency" value="1" min="1" max="3" step="1">
+      <input type="number" id="concurrency" value="1" min="1" max="10" step="1">
     </div>
   </div>
 
@@ -624,7 +624,7 @@ async function runBench() {
     maxTokens: parseInt(document.getElementById('maxTokens').value, 10),
   };
   const n = Math.max(1, Math.min(30, parseInt(document.getElementById('repeatN').value, 10) || 1));
-  const concurrency = Math.max(1, Math.min(3, parseInt(document.getElementById('concurrency').value, 10) || 1));
+  const concurrency = Math.max(1, Math.min(10, parseInt(document.getElementById('concurrency').value, 10) || 1));
 
   const judgeEnabled = document.getElementById('judgeEnabled').checked;
   const rubric = document.getElementById('rubric').value.trim();
