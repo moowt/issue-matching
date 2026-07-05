@@ -217,8 +217,16 @@
     <div class="card-title">実行API設定（OpenAI互換）</div>
     <div class="form-row">
       <div class="form-group">
-        <label for="baseUrl">Base URL</label>
-        <input type="url" id="baseUrl" value="https://api.groq.com/openai/v1">
+        <label for="providerPreset">
+          プロバイダプリセット
+          <span class="info-icon">ⓘ<span class="tooltip">「OpenAI互換API」はリクエスト形式が同じという意味で、APIキーはプロバイダ間で共通ではありません。プリセットを選ぶとBase URLと候補モデルが自動設定されます。APIキーは各プロバイダのサイトで個別に発行してください。</span></span>
+        </label>
+        <select id="providerPreset" onchange="applyProviderPreset()">
+          <option value="groq" selected>Groq（推奨・低コスト）</option>
+          <option value="openrouter">OpenRouter（gpt-oss-120b無料枠あり）</option>
+          <option value="together">Together AI</option>
+          <option value="custom">カスタム（手動入力）</option>
+        </select>
       </div>
       <div class="form-group">
         <label for="apiKey">API キー</label>
@@ -227,9 +235,13 @@
     </div>
     <div class="form-row">
       <div class="form-group">
+        <label for="baseUrl">Base URL</label>
+        <input type="url" id="baseUrl" value="https://api.groq.com/openai/v1">
+      </div>
+      <div class="form-group">
         <label for="modelInput">
           モデル
-          <span class="info-icon">ⓘ<span class="tooltip">デフォルトはGroqでホストされる openai/gpt-oss-120b。「一覧取得」でアカウントが利用可能な全モデルIDを取得し、下の候補一覧を更新します。候補になくても直接入力可能です。</span></span>
+          <span class="info-icon">ⓘ<span class="tooltip">「モデル一覧を取得」でアカウントが利用可能な全モデルIDを取得し、下の候補一覧を更新します。候補になくても直接入力可能です。</span></span>
         </label>
         <input type="text" id="modelInput" list="modelList" value="openai/gpt-oss-120b">
         <datalist id="modelList">
@@ -239,10 +251,11 @@
           <option value="llama-3.1-8b-instant">
         </datalist>
       </div>
-      <div class="form-group" style="display:flex; align-items:flex-end;">
-        <button class="btn btn-ghost" id="fetchModelsBtn" onclick="fetchModels()">モデル一覧を取得</button>
-      </div>
     </div>
+    <div style="margin-bottom:14px;">
+      <button class="btn btn-ghost" id="fetchModelsBtn" onclick="fetchModels()">モデル一覧を取得</button>
+    </div>
+    <div class="card-note" id="providerNote">APIキーは console.groq.com で取得。gpt-oss-120bは $0.15 / $0.60 per 1M tok（入力/出力）と低コスト。</div>
     <div class="card-note">
       APIキーはJS変数（メモリ上）にのみ保持し、ページを閉じると消去されます。localStorage等への保存は行いません。
       ブラウザから直接APIへリクエストするため、Origin制限のあるプロバイダでは失敗する場合があります（実行時にCORSエラーの案内を表示します）。
@@ -428,6 +441,46 @@ function cosSim(a, b) {
 
 function mean(arr) { return arr.length ? arr.reduce((s,v)=>s+v,0)/arr.length : 0; }
 function stdDev(arr) { const m = mean(arr); return Math.sqrt(mean(arr.map(v=>(v-m)**2))); }
+
+// ─── Provider presets ───────────────────────────────────────────────────────
+
+const PROVIDER_PRESETS = {
+  groq: {
+    baseUrl: 'https://api.groq.com/openai/v1',
+    models: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
+    defaultModel: 'openai/gpt-oss-120b',
+    note: 'APIキーは console.groq.com で取得。gpt-oss-120bは $0.15 / $0.60 per 1M tok（入力/出力）と低コスト。',
+  },
+  openrouter: {
+    baseUrl: 'https://openrouter.ai/api/v1',
+    models: ['openai/gpt-oss-120b:free', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b:free', 'openai/gpt-oss-20b'],
+    defaultModel: 'openai/gpt-oss-120b:free',
+    note: 'APIキーは openrouter.ai で取得。":free" サフィックスは無料枠（強いレート制限あり）。安定した繰り返し実行が必要な場合は ":free" なしの有料版を推奨。',
+  },
+  together: {
+    baseUrl: 'https://api.together.xyz/v1',
+    models: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
+    defaultModel: 'openai/gpt-oss-120b',
+    note: 'APIキーは api.together.ai で取得。',
+  },
+  custom: {
+    baseUrl: '',
+    models: [],
+    defaultModel: '',
+    note: 'Base URL・モデルIDを直接入力してください。APIキーは接続先プロバイダで発行したものを使用します。',
+  },
+};
+
+function applyProviderPreset() {
+  const key = document.getElementById('providerPreset').value;
+  const preset = PROVIDER_PRESETS[key];
+  if (key !== 'custom') {
+    document.getElementById('baseUrl').value = preset.baseUrl;
+    document.getElementById('modelInput').value = preset.defaultModel;
+  }
+  document.getElementById('modelList').innerHTML = preset.models.map(id => `<option value="${escapeHtml(id)}">`).join('');
+  document.getElementById('providerNote').textContent = preset.note;
+}
 
 // ─── API calls ──────────────────────────────────────────────────────────────
 
