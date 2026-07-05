@@ -1,0 +1,854 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Prompt Bench — プロンプト再現性検証ツール</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --surface2: #252836;
+      --border: #2d3148;
+      --text: #e4e6ef;
+      --text2: #8b90a0;
+      --accent: #5b8ef0;
+      --accent2: #7c6cf0;
+      --success: #3ecf8e;
+      --warning: #f5a623;
+      --danger: #f06060;
+      --r: 8px;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      font-size: 16px;
+      line-height: 1.6;
+    }
+
+    .container { max-width: 1280px; margin: 0 auto; padding: 24px 20px; }
+
+    header {
+      text-align: center;
+      padding: 40px 0 28px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 28px;
+    }
+    header h1 { font-size: 26px; font-weight: 700; margin-bottom: 6px; }
+    header p  { color: var(--text2); font-size: 15px; }
+
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--r);
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 13px; font-weight: 700;
+      text-transform: uppercase; letter-spacing: .07em;
+      color: var(--text2); margin-bottom: 16px;
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    }
+
+    label { display: block; font-size: 14px; color: var(--text2); margin-bottom: 5px; }
+    input[type="text"], input[type="password"], input[type="number"], select, textarea {
+      width: 100%; background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; color: var(--text); padding: 9px 12px;
+      font-size: 15px; font-family: inherit; outline: none; transition: border-color .2s;
+    }
+    input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+    select { cursor: pointer; }
+    textarea { resize: vertical; font-family: 'Monaco','Menlo','Consolas',monospace; font-size: 13px; min-height: 90px; }
+
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .form-row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+    .form-row-5 { display: grid; grid-template-columns: repeat(5,1fr); gap: 16px; }
+    .form-group { margin-bottom: 14px; }
+    .form-group:last-child { margin-bottom: 0; }
+    .hint { font-size: 12px; color: var(--text2); margin-top: 4px; line-height: 1.5; }
+
+    /* Buttons */
+    .btn {
+      padding: 9px 18px; border-radius: 6px; font-size: 15px; font-weight: 600;
+      cursor: pointer; border: none; transition: all .15s;
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover:not(:disabled) { background: #4a7de0; }
+    .btn-primary:disabled { opacity: .45; cursor: not-allowed; }
+    .btn-ghost {
+      background: transparent; color: var(--text2);
+      border: 1px solid var(--border); padding: 6px 12px; font-size: 14px;
+    }
+    .btn-ghost:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+    .btn-ghost:disabled { opacity: .4; cursor: not-allowed; }
+    .btn-success { background: var(--success); color: #08281c; }
+    .btn-success:hover:not(:disabled) { background: #35b87c; }
+
+    /* Tabs */
+    .tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--border); margin-bottom: 20px; }
+    .tab {
+      padding: 10px 22px; font-size: 15px; font-weight: 500;
+      color: var(--text2); cursor: pointer; border-bottom: 2px solid transparent;
+      margin-bottom: -1px; transition: all .15s; user-select: none;
+    }
+    .tab:hover:not(.active) { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+    .tab-content { display: none; }
+    .tab-content.active { display: block; }
+
+    /* Progress */
+    .progress-bar { height: 3px; background: var(--border); border-radius: 2px; overflow: hidden; margin-top: 10px; }
+    .progress-fill {
+      height: 100%; background: linear-gradient(90deg, var(--accent), var(--accent2));
+      border-radius: 2px; transition: width .25s ease;
+    }
+
+    /* Status */
+    .status { padding: 11px 15px; border-radius: 6px; font-size: 14px; margin: 10px 0; }
+    .status-info    { background: rgba(91,142,240,.1);  border: 1px solid rgba(91,142,240,.3);  color: var(--accent); }
+    .status-success { background: rgba(62,207,142,.1);  border: 1px solid rgba(62,207,142,.3);  color: var(--success); }
+    .status-error   { background: rgba(240,96,96,.1);   border: 1px solid rgba(240,96,96,.3);   color: var(--danger); }
+    .status-warn    { background: rgba(245,166,35,.1);  border: 1px solid rgba(245,166,35,.3);  color: var(--warning); }
+
+    /* Summary stats */
+    .stats-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-bottom: 20px; }
+    .stat-card {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 6px; padding: 13px; text-align: center;
+    }
+    .stat-val { font-size: 21px; font-weight: 700; }
+    .stat-lbl { font-size: 11px; color: var(--text2); margin-top: 3px; line-height: 1.3; }
+
+    /* Run cards */
+    .run-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 12px; }
+    .run-card {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: 8px; padding: 14px; display: flex; flex-direction: column; gap: 8px;
+    }
+    .run-card.error { border-color: rgba(240,96,96,.4); }
+    .run-card-hdr { display: flex; align-items: center; justify-content: space-between; }
+    .run-idx { font-family: monospace; font-weight: 700; font-size: 13px; color: var(--accent); }
+    .run-meta { font-size: 11px; color: var(--text2); display: flex; gap: 10px; flex-wrap: wrap; }
+    .run-body {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 10px; font-size: 13px; white-space: pre-wrap; word-break: break-word;
+      max-height: 220px; overflow-y: auto; font-family: 'Monaco','Menlo','Consolas',monospace;
+    }
+    .run-judge { font-size: 12px; padding: 6px 8px; border-radius: 5px; background: rgba(124,108,240,.08); border: 1px solid rgba(124,108,240,.25); }
+    .score-pill {
+      display: inline-block; padding: 1px 8px; border-radius: 10px; font-weight: 700; font-size: 11px;
+      background: rgba(62,207,142,.15); color: var(--success); border: 1px solid rgba(62,207,142,.3);
+    }
+
+    /* Heatmap (embedding similarity) */
+    .hm-wrap { overflow-x: auto; padding-bottom: 4px; }
+    .hm-grid {
+      display: inline-grid; gap: 2px;
+      padding: 8px; background: var(--surface2);
+      border-radius: 6px; border: 1px solid var(--border);
+    }
+    .hm-cell {
+      border-radius: 3px; display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 600; font-family: monospace;
+    }
+    .hm-lbl {
+      display: flex; align-items: center; justify-content: center;
+      font-size: 9px; font-weight: 700; font-family: monospace;
+    }
+    .legend-bar { display: flex; align-items: center; gap: 6px; margin-top: 8px; font-size: 11px; color: var(--text2); }
+    .legend-gradient { display: flex; gap: 1px; border-radius: 3px; overflow: hidden; }
+    .legend-swatch { width: 18px; height: 10px; }
+
+    .info-icon {
+      display: inline-flex; align-items: center; justify-content: center;
+      width: 14px; height: 14px; border-radius: 50%;
+      background: var(--surface2); border: 1px solid var(--border);
+      font-size: 9px; color: var(--text2); cursor: default;
+      position: relative; vertical-align: middle; margin-left: 4px;
+      user-select: none; flex-shrink: 0;
+    }
+    .info-icon:hover { border-color: var(--accent); color: var(--accent); }
+    .info-icon .tooltip {
+      display: none; position: absolute; bottom: calc(100% + 6px); left: 50%;
+      transform: translateX(-50%); background: var(--surface2);
+      border: 1px solid var(--border); border-radius: 6px;
+      padding: 8px 10px; font-size: 12px; color: var(--text);
+      white-space: normal; width: 260px; z-index: 100; line-height: 1.5;
+      box-shadow: 0 4px 12px rgba(0,0,0,.4); pointer-events: none;
+      text-align: left; font-weight: 400; letter-spacing: 0;
+    }
+    .info-icon:hover .tooltip { display: block; }
+
+    .spinner {
+      display: inline-block; width: 14px; height: 14px;
+      border: 2px solid var(--border); border-top-color: var(--accent);
+      border-radius: 50%; animation: spin .7s linear infinite; vertical-align: middle;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .separator { height: 1px; background: var(--border); margin: 20px 0; }
+    .no-data { text-align: center; padding: 40px; color: var(--text2); font-size: 14px; }
+    .hidden { display: none !important; }
+    .checkbox-row { display: flex; align-items: center; gap: 8px; font-size: 14px; }
+    .checkbox-row input { width: auto; }
+
+    @media (max-width: 900px) {
+      .form-row, .form-row-3, .form-row-5 { grid-template-columns: 1fr 1fr; }
+      .stats-grid { grid-template-columns: repeat(2, 1fr); }
+    }
+    @media (max-width: 560px) {
+      .form-row, .form-row-3, .form-row-5 { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+<div class="container">
+
+  <header>
+    <h1>Prompt Bench</h1>
+    <p>同一プロンプト・パラメータを固定してN回実行し、出力のばらつきを検証する</p>
+  </header>
+
+  <!-- Connection -->
+  <div class="card">
+    <div class="card-title">接続設定</div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="apiKey">Groq API キー</label>
+        <input type="password" id="apiKey" placeholder="gsk_..." autocomplete="off">
+        <div class="hint">メモリ上にのみ保持し、保存はしません。ページを再読み込みすると消えます。</div>
+      </div>
+      <div class="form-group">
+        <label for="baseUrl">Base URL <span class="info-icon">ⓘ<span class="tooltip">OpenAI互換のchat completions / models / embeddingsエンドポイントを持つサービスであれば変更可能です。ブラウザから直接Groqを叩くとCORSでブロックされる場合は、プロキシのURLに差し替えてください。</span></span></label>
+        <input type="text" id="baseUrl" value="https://api.groq.com/openai/v1">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label for="modelSelect">モデル</label>
+        <select id="modelSelect">
+          <option value="openai/gpt-oss-120b">openai/gpt-oss-120b</option>
+          <option value="openai/gpt-oss-20b">openai/gpt-oss-20b</option>
+          <option value="llama-3.3-70b-versatile">llama-3.3-70b-versatile</option>
+          <option value="llama-3.1-8b-instant">llama-3.1-8b-instant</option>
+          <option value="__custom__">カスタム（IDを直接入力）...</option>
+        </select>
+        <input type="text" id="modelCustom" class="hidden" placeholder="モデルIDを入力" style="margin-top:8px;">
+      </div>
+      <div class="form-group">
+        <label>&nbsp;</label>
+        <button class="btn btn-ghost" id="fetchModelsBtn" onclick="fetchModels()">モデル一覧を取得</button>
+        <span id="fetchModelsMsg" class="hint"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Prompts -->
+  <div class="card">
+    <div class="card-title">プロンプト</div>
+    <div class="form-group">
+      <label for="systemPrompt">システムプロンプト</label>
+      <textarea id="systemPrompt" placeholder="（任意）例: あなたは親切なアシスタントです。">あなたは親切なアシスタントです。</textarea>
+    </div>
+    <div class="form-group">
+      <label for="userPrompt">ユーザープロンプト</label>
+      <textarea id="userPrompt" placeholder="実行するプロンプトを入力してください" style="min-height:120px;">1から10までの整数を足し合わせてください。</textarea>
+    </div>
+  </div>
+
+  <!-- Params -->
+  <div class="card">
+    <div class="card-title">パラメータ</div>
+    <div class="form-row-5">
+      <div class="form-group">
+        <label for="temperature">temperature</label>
+        <input type="number" id="temperature" value="0.7" min="0" max="2" step="0.05">
+      </div>
+      <div class="form-group">
+        <label for="topP">top_p</label>
+        <input type="number" id="topP" value="1" min="0" max="1" step="0.05">
+      </div>
+      <div class="form-group">
+        <label for="maxTokens">max_tokens</label>
+        <input type="number" id="maxTokens" value="512" min="1" max="32768" step="1">
+      </div>
+      <div class="form-group">
+        <label for="repeatN">繰り返し回数</label>
+        <input type="number" id="repeatN" value="5" min="1" max="30" step="1">
+      </div>
+      <div class="form-group">
+        <label for="concurrency">同時実行数 <span class="info-icon">ⓘ<span class="tooltip">同時に投げるリクエスト数。無料枠のレート制限（例: 30 req/分）に注意し、通常は1〜3を推奨します。</span></span></label>
+        <select id="concurrency">
+          <option value="1">1（逐次）</option>
+          <option value="2">2</option>
+          <option value="3">3</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <!-- Run -->
+  <div style="text-align:center; margin:24px 0 18px;">
+    <button class="btn btn-primary" id="runBtn" onclick="runBench()" style="padding:13px 44px;font-size:16px;">
+      実行
+    </button>
+    <div id="progWrap" class="hidden" style="max-width:480px;margin:14px auto 0;">
+      <div id="progText" style="font-size:13px;color:var(--text2);margin-bottom:5px;"></div>
+      <div class="progress-bar"><div class="progress-fill" id="progFill" style="width:0%"></div></div>
+    </div>
+  </div>
+
+  <div id="globalMsg"></div>
+
+  <!-- Results -->
+  <div id="results" class="hidden">
+    <div class="stats-grid" id="summaryStats"></div>
+
+    <div class="tabs">
+      <div class="tab active" data-tab="runs" onclick="switchTab(this)">実行結果</div>
+      <div class="tab" data-tab="judge" onclick="switchTab(this)">LLM-as-Judge</div>
+      <div class="tab" data-tab="embed" onclick="switchTab(this)">Embedding類似度</div>
+    </div>
+
+    <!-- Runs -->
+    <div id="tab-runs" class="tab-content active">
+      <div style="text-align:right;margin-bottom:12px;">
+        <button class="btn btn-ghost" onclick="copyReport()">レポートをコピー</button>
+        <button class="btn btn-ghost" onclick="exportJSON()">JSONエクスポート</button>
+      </div>
+      <div id="runGrid" class="run-grid"></div>
+    </div>
+
+    <!-- Judge -->
+    <div id="tab-judge" class="tab-content">
+      <div class="card">
+        <div class="card-title">採点基準（Rubric）</div>
+        <div class="form-group">
+          <label for="judgeModel">審査モデル</label>
+          <select id="judgeModel"></select>
+        </div>
+        <div class="form-group">
+          <label for="rubric">評価基準</label>
+          <textarea id="rubric" style="min-height:110px;">以下の基準で0〜10点の整数で評価してください。
+1. 指示への忠実性（ユーザープロンプトの要求を満たしているか）
+2. 内容の正確性・論理的一貫性
+3. 簡潔さ・読みやすさ
+
+JSON形式で {"score": <0-10の整数>, "reason": "<日本語で簡潔な理由>"} のみを出力してください。他のテキストは一切出力しないでください。</textarea>
+        </div>
+        <button class="btn btn-primary" id="judgeBtn" onclick="runJudge()">全実行結果を採点</button>
+        <span id="judgeMsg" class="hint"></span>
+      </div>
+      <div id="judgeSummary"></div>
+      <div id="judgeGrid" class="run-grid"></div>
+    </div>
+
+    <!-- Embedding -->
+    <div id="tab-embed" class="tab-content">
+      <div class="card">
+        <div class="card-title">Embedding設定</div>
+        <div class="form-row">
+          <div class="form-group">
+            <label for="embModel">Embeddingモデル ID <span class="info-icon">ⓘ<span class="tooltip">Groqの/v1/embeddingsで利用可能なモデルIDは執筆時点で未確定です。お使いのアカウントで有効なモデルIDを入力してください。失敗する場合はBase URLをOpenAI等embedding対応サービスに切り替えてください。</span></span></label>
+            <input type="text" id="embModel" placeholder="例: nomic-embed-text-v1.5">
+          </div>
+          <div class="form-group">
+            <label>&nbsp;</label>
+            <button class="btn btn-primary" id="embedBtn" onclick="runEmbeddingAnalysis()">類似度を計算</button>
+          </div>
+        </div>
+        <span id="embedMsg" class="hint"></span>
+      </div>
+      <div id="embedResults"></div>
+    </div>
+  </div>
+
+</div>
+<script>
+// ─── State ──────────────────────────────────────────────────────────────────
+let fetchedModels = [];
+let currentResults = [];   // {index, content, usage, latencyMs, error, promptTokens, completionTokens, totalTokens}
+let judgeResults = [];     // {index, score, reason, error}
+let embeddings = [];       // vector per successful run
+
+// ─── Utilities ──────────────────────────────────────────────────────────────
+
+function setMsg(id, msg, type) {
+  const el = document.getElementById(id);
+  el.innerHTML = msg ? `<div class="status status-${type}">${msg}</div>` : '';
+}
+
+function setProgress(pct, text) {
+  document.getElementById('progFill').style.width = pct + '%';
+  document.getElementById('progText').textContent = text;
+}
+
+function switchTab(el) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+  el.classList.add('active');
+  document.getElementById('tab-' + el.dataset.tab).classList.add('active');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+function getModel() {
+  const sel = document.getElementById('modelSelect').value;
+  if (sel === '__custom__') return document.getElementById('modelCustom').value.trim();
+  return sel;
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+async function pooledRun(items, concurrency, worker, onProgress) {
+  const results = new Array(items.length);
+  let next = 0, done = 0;
+  async function runner() {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await worker(items[i], i);
+      done++;
+      onProgress(done, items.length);
+    }
+  }
+  const runners = Array.from({ length: Math.min(concurrency, items.length) }, runner);
+  await Promise.all(runners);
+  return results;
+}
+
+function cosSim(a, b) {
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) { dot += a[i]*b[i]; na += a[i]*a[i]; nb += b[i]*b[i]; }
+  const d = Math.sqrt(na) * Math.sqrt(nb);
+  return d === 0 ? 0 : dot / d;
+}
+
+function simMatrix(embs) {
+  const n = embs.length;
+  return Array.from({length:n}, (_,i) => Array.from({length:n}, (_,j) => cosSim(embs[i], embs[j])));
+}
+
+// ─── Model list ─────────────────────────────────────────────────────────────
+
+document.getElementById('modelSelect').addEventListener('change', (e) => {
+  document.getElementById('modelCustom').classList.toggle('hidden', e.target.value !== '__custom__');
+});
+
+async function fetchModels() {
+  const apiKey = document.getElementById('apiKey').value.trim();
+  const baseUrl = document.getElementById('baseUrl').value.trim().replace(/\/$/, '');
+  if (!apiKey) { setMsg('fetchModelsMsg', 'APIキーを先に入力してください', 'error'); return; }
+
+  const btn = document.getElementById('fetchModelsBtn');
+  btn.disabled = true;
+  document.getElementById('fetchModelsMsg').innerHTML = '<span class="spinner"></span> 取得中…';
+
+  try {
+    const r = await fetch(`${baseUrl}/models`, { headers: { 'Authorization': `Bearer ${apiKey}` } });
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      throw new Error(`API ${r.status}: ${e.error?.message || r.statusText}`);
+    }
+    const data = await r.json();
+    const ids = (data.data || []).map(m => m.id).sort();
+    if (!ids.length) throw new Error('モデルが見つかりませんでした');
+    fetchedModels = ids;
+
+    const sel = document.getElementById('modelSelect');
+    const judgeSel = document.getElementById('judgeModel');
+    const prevVal = sel.value === '__custom__' ? null : sel.value;
+    sel.innerHTML = ids.map(id => `<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`).join('')
+      + '<option value="__custom__">カスタム（IDを直接入力）...</option>';
+    judgeSel.innerHTML = ids.map(id => `<option value="${escapeHtml(id)}">${escapeHtml(id)}</option>`).join('');
+    if (prevVal && ids.includes(prevVal)) sel.value = prevVal;
+
+    document.getElementById('fetchModelsMsg').textContent = `${ids.length} 件のモデルを取得しました`;
+  } catch (err) {
+    document.getElementById('fetchModelsMsg').textContent = '';
+    setMsg('fetchModelsMsg', `取得失敗: ${err.message}（CORSでブロックされている可能性があります）`, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// Populate judge model select with defaults at load
+(function initJudgeModelSelect() {
+  const judgeSel = document.getElementById('judgeModel');
+  const defaults = ['openai/gpt-oss-120b','openai/gpt-oss-20b','llama-3.3-70b-versatile','llama-3.1-8b-instant'];
+  judgeSel.innerHTML = defaults.map(id => `<option value="${id}">${id}</option>`).join('');
+})();
+
+// ─── Chat completion call ───────────────────────────────────────────────────
+
+async function chatComplete(apiKey, baseUrl, model, messages, params) {
+  const t0 = performance.now();
+  const r = await fetch(`${baseUrl}/chat/completions`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+    body: JSON.stringify({
+      model, messages,
+      temperature: params.temperature,
+      top_p: params.topP,
+      max_tokens: params.maxTokens,
+    }),
+  });
+  const latencyMs = performance.now() - t0;
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(`API ${r.status}: ${e.error?.message || r.statusText}`);
+  }
+  const data = await r.json();
+  const content = data.choices?.[0]?.message?.content ?? '';
+  return { content, usage: data.usage || {}, latencyMs };
+}
+
+// ─── Main run ────────────────────────────────────────────────────────────────
+
+async function runBench() {
+  const apiKey = document.getElementById('apiKey').value.trim();
+  const baseUrl = document.getElementById('baseUrl').value.trim().replace(/\/$/, '');
+  const model = getModel();
+  const systemPrompt = document.getElementById('systemPrompt').value;
+  const userPrompt = document.getElementById('userPrompt').value;
+  const temperature = parseFloat(document.getElementById('temperature').value);
+  const topP = parseFloat(document.getElementById('topP').value);
+  const maxTokens = parseInt(document.getElementById('maxTokens').value, 10);
+  const n = Math.max(1, Math.min(30, parseInt(document.getElementById('repeatN').value, 10) || 1));
+  const concurrency = parseInt(document.getElementById('concurrency').value, 10);
+
+  if (!apiKey) return setMsg('globalMsg', 'Groq API キーを入力してください', 'error');
+  if (!model) return setMsg('globalMsg', 'モデルを選択または入力してください', 'error');
+  if (!userPrompt.trim()) return setMsg('globalMsg', 'ユーザープロンプトを入力してください', 'error');
+
+  setMsg('globalMsg', '', 'info');
+  const btn = document.getElementById('runBtn');
+  btn.disabled = true;
+  document.getElementById('progWrap').classList.remove('hidden');
+  document.getElementById('results').classList.add('hidden');
+  setProgress(0, `0 / ${n} 完了`);
+
+  currentResults = [];
+  judgeResults = [];
+  embeddings = [];
+
+  const messages = [];
+  if (systemPrompt.trim()) messages.push({ role: 'system', content: systemPrompt });
+  messages.push({ role: 'user', content: userPrompt });
+
+  const params = { temperature, topP, maxTokens };
+  const items = Array.from({ length: n }, (_, i) => i);
+
+  try {
+    await pooledRun(items, concurrency, async (i) => {
+      try {
+        const res = await chatComplete(apiKey, baseUrl, model, messages, params);
+        currentResults[i] = {
+          index: i, content: res.content, error: null, latencyMs: res.latencyMs,
+          promptTokens: res.usage.prompt_tokens ?? null,
+          completionTokens: res.usage.completion_tokens ?? null,
+          totalTokens: res.usage.total_tokens ?? null,
+        };
+      } catch (err) {
+        currentResults[i] = { index: i, content: null, error: err.message, latencyMs: null,
+          promptTokens: null, completionTokens: null, totalTokens: null };
+      }
+      if (concurrency === 1) await sleep(50);
+    }, (done, total) => setProgress(done/total*100, `${done} / ${total} 完了`));
+
+    renderResults(model, params, n);
+  } catch (err) {
+    setMsg('globalMsg', `実行エラー: ${err.message}`, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function renderResults(model, params, n) {
+  document.getElementById('results').classList.remove('hidden');
+
+  const ok = currentResults.filter(r => !r.error);
+  const errCount = currentResults.length - ok.length;
+  const avgLatency = ok.length ? ok.reduce((s,r)=>s+r.latencyMs,0)/ok.length : 0;
+  const avgTotalTokens = ok.filter(r=>r.totalTokens!=null).length
+    ? ok.filter(r=>r.totalTokens!=null).reduce((s,r)=>s+r.totalTokens,0) / ok.filter(r=>r.totalTokens!=null).length
+    : null;
+  const uniqueOutputs = new Set(ok.map(r => r.content.trim())).size;
+
+  document.getElementById('summaryStats').innerHTML = `
+    <div class="stat-card"><div class="stat-val" style="color:var(--success)">${ok.length}/${n}</div><div class="stat-lbl">成功 / 総実行回数</div></div>
+    <div class="stat-card"><div class="stat-val" style="color:${errCount?'var(--danger)':'var(--text2)'}">${errCount}</div><div class="stat-lbl">エラー件数</div></div>
+    <div class="stat-card"><div class="stat-val">${avgLatency.toFixed(0)}ms</div><div class="stat-lbl">平均レイテンシ</div></div>
+    <div class="stat-card"><div class="stat-val">${avgTotalTokens!=null?avgTotalTokens.toFixed(0):'—'}</div><div class="stat-lbl">平均トークン数（total）</div></div>
+  `;
+
+  document.getElementById('runGrid').innerHTML = currentResults.map(r => runCardHtml(r)).join('');
+
+  const uniqNote = ok.length ? `<div class="hint" style="margin-top:8px;">完全一致するテキストのユニーク数: ${uniqueOutputs} / ${ok.length}（同一なら決定的、複数あれば非決定的な出力）</div>` : '';
+  document.getElementById('runGrid').insertAdjacentHTML('beforeend', ok.length ? uniqNote : '');
+}
+
+function runCardHtml(r) {
+  if (r.error) {
+    return `<div class="run-card error">
+      <div class="run-card-hdr"><span class="run-idx">#${r.index+1}</span></div>
+      <div class="status status-error" style="margin:0;">${escapeHtml(r.error)}</div>
+    </div>`;
+  }
+  const meta = [
+    `${r.latencyMs.toFixed(0)}ms`,
+    r.promptTokens!=null ? `prompt:${r.promptTokens}` : null,
+    r.completionTokens!=null ? `completion:${r.completionTokens}` : null,
+    r.totalTokens!=null ? `total:${r.totalTokens}` : null,
+  ].filter(Boolean).join(' ・ ');
+  return `<div class="run-card" id="runcard-${r.index}">
+    <div class="run-card-hdr">
+      <span class="run-idx">#${r.index+1}</span>
+      <span class="run-meta">${meta}</span>
+    </div>
+    <div class="run-body">${escapeHtml(r.content)}</div>
+    <div id="judgeSlot-${r.index}"></div>
+  </div>`;
+}
+
+// ─── LLM-as-Judge ────────────────────────────────────────────────────────────
+
+function extractJson(text) {
+  const m = text.match(/\{[\s\S]*\}/);
+  if (!m) throw new Error('JSON が見つかりませんでした');
+  return JSON.parse(m[0]);
+}
+
+async function runJudge() {
+  const apiKey = document.getElementById('apiKey').value.trim();
+  const baseUrl = document.getElementById('baseUrl').value.trim().replace(/\/$/, '');
+  const judgeModel = document.getElementById('judgeModel').value;
+  const rubric = document.getElementById('rubric').value;
+  const userPrompt = document.getElementById('userPrompt').value;
+
+  if (!apiKey) return setMsg('judgeMsg', 'APIキーを入力してください', 'error');
+  const ok = currentResults.filter(r => !r.error);
+  if (!ok.length) return setMsg('judgeMsg', '採点対象の実行結果がありません', 'error');
+
+  const btn = document.getElementById('judgeBtn');
+  btn.disabled = true;
+  document.getElementById('judgeMsg').innerHTML = '<span class="spinner"></span> 採点中…';
+
+  judgeResults = [];
+  let done = 0;
+  for (const r of ok) {
+    try {
+      const messages = [
+        { role: 'system', content: rubric },
+        { role: 'user', content: `【元のユーザープロンプト】\n${userPrompt}\n\n【評価対象の出力】\n${r.content}` },
+      ];
+      const res = await chatComplete(apiKey, baseUrl, judgeModel, messages, { temperature: 0, topP: 1, maxTokens: 300 });
+      const parsed = extractJson(res.content);
+      judgeResults.push({ index: r.index, score: Number(parsed.score), reason: String(parsed.reason || '') });
+    } catch (err) {
+      judgeResults.push({ index: r.index, score: null, reason: null, error: err.message });
+    }
+    done++;
+    document.getElementById('judgeMsg').innerHTML = `<span class="spinner"></span> 採点中… ${done}/${ok.length}`;
+    await sleep(50);
+  }
+
+  renderJudgeResults();
+  document.getElementById('judgeMsg').textContent = '採点完了';
+  btn.disabled = false;
+}
+
+function renderJudgeResults() {
+  const valid = judgeResults.filter(j => j.score != null && !Number.isNaN(j.score));
+  const avg = valid.length ? valid.reduce((s,j)=>s+j.score,0)/valid.length : null;
+  const std = valid.length ? Math.sqrt(valid.reduce((s,j)=>s+(j.score-avg)**2,0)/valid.length) : null;
+
+  document.getElementById('judgeSummary').innerHTML = valid.length ? `
+    <div class="stats-grid" style="grid-template-columns:repeat(3,1fr);">
+      <div class="stat-card"><div class="stat-val" style="color:var(--success)">${avg.toFixed(2)}</div><div class="stat-lbl">平均スコア（0-10）</div></div>
+      <div class="stat-card"><div class="stat-val">${std.toFixed(2)}</div><div class="stat-lbl">標準偏差</div></div>
+      <div class="stat-card"><div class="stat-val">${valid.length}/${judgeResults.length}</div><div class="stat-lbl">採点成功件数</div></div>
+    </div>` : '';
+
+  document.getElementById('judgeGrid').innerHTML = judgeResults.map(j => {
+    const src = currentResults.find(r => r.index === j.index);
+    if (j.error) {
+      return `<div class="run-card error">
+        <div class="run-card-hdr"><span class="run-idx">#${j.index+1}</span></div>
+        <div class="status status-error" style="margin:0;">採点失敗: ${escapeHtml(j.error)}</div>
+      </div>`;
+    }
+    return `<div class="run-card">
+      <div class="run-card-hdr">
+        <span class="run-idx">#${j.index+1}</span>
+        <span class="score-pill">${j.score} / 10</span>
+      </div>
+      <div class="run-body" style="max-height:80px;">${escapeHtml(src ? src.content : '')}</div>
+      <div class="run-judge">${escapeHtml(j.reason)}</div>
+    </div>`;
+  }).join('');
+}
+
+// ─── Embedding similarity ────────────────────────────────────────────────────
+
+async function embed(apiKey, baseUrl, model, text) {
+  const r = await fetch(`${baseUrl}/embeddings`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
+    body: JSON.stringify({ model, input: text }),
+  });
+  if (!r.ok) {
+    const e = await r.json().catch(() => ({}));
+    throw new Error(`API ${r.status}: ${e.error?.message || r.statusText}`);
+  }
+  const data = await r.json();
+  return data.data[0].embedding;
+}
+
+async function runEmbeddingAnalysis() {
+  const apiKey = document.getElementById('apiKey').value.trim();
+  const baseUrl = document.getElementById('baseUrl').value.trim().replace(/\/$/, '');
+  const embModel = document.getElementById('embModel').value.trim();
+
+  if (!apiKey) return setMsg('embedMsg', 'APIキーを入力してください', 'error');
+  if (!embModel) return setMsg('embedMsg', 'Embeddingモデル ID を入力してください', 'error');
+  const ok = currentResults.filter(r => !r.error);
+  if (ok.length < 2) return setMsg('embedMsg', '類似度計算には2件以上の成功した実行結果が必要です', 'error');
+
+  const btn = document.getElementById('embedBtn');
+  btn.disabled = true;
+  document.getElementById('embedMsg').innerHTML = '<span class="spinner"></span> Embedding計算中…';
+
+  try {
+    embeddings = [];
+    for (let i = 0; i < ok.length; i++) {
+      document.getElementById('embedMsg').innerHTML = `<span class="spinner"></span> Embedding計算中… ${i+1}/${ok.length}`;
+      const vec = await embed(apiKey, baseUrl, embModel, ok[i].content);
+      embeddings.push(vec);
+    }
+    renderEmbeddingResults(ok);
+    document.getElementById('embedMsg').textContent = '計算完了';
+  } catch (err) {
+    setMsg('embedMsg', `計算失敗: ${err.message}（このモデルIDがembeddingsに対応していない可能性があります。Base URLの切り替えもご検討ください）`, 'error');
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function simColor(v, lo, hi) {
+  const t = hi === lo ? 1 : Math.max(0, Math.min(1, (v - lo) / (hi - lo)));
+  const r = Math.round(247 - t*239), g = Math.round(251 - t*203), b = Math.round(255 - t*148);
+  return { bg: `rgb(${r},${g},${b})`, text: t > .55 ? '#fff' : '#1a1d27' };
+}
+
+function renderEmbeddingResults(ok) {
+  const mat = simMatrix(embeddings);
+  const n = mat.length;
+  const vals = [];
+  for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) if (i !== j) vals.push(mat[i][j]);
+  const mean = vals.reduce((s,v)=>s+v,0) / vals.length;
+  const min = Math.min(...vals), max = Math.max(...vals);
+  const variance = vals.reduce((s,v)=>s+(v-mean)**2,0) / vals.length;
+  const std = Math.sqrt(variance);
+
+  let html = `<div class="stats-grid">
+    <div class="stat-card"><div class="stat-val" style="color:var(--success)">${mean.toFixed(4)}</div><div class="stat-lbl">平均類似度（安定性スコア）</div></div>
+    <div class="stat-card"><div class="stat-val">${min.toFixed(4)}</div><div class="stat-lbl">最小類似度</div></div>
+    <div class="stat-card"><div class="stat-val">${max.toFixed(4)}</div><div class="stat-lbl">最大類似度</div></div>
+    <div class="stat-card"><div class="stat-val">${std.toFixed(4)}</div><div class="stat-lbl">標準偏差</div></div>
+  </div>`;
+
+  const CELL = n <= 8 ? 38 : n <= 16 ? 28 : 20;
+  const LBL = 26;
+  let lo = Infinity, hi = -Infinity;
+  for (let i=0;i<n;i++) for(let j=0;j<n;j++) if(i!==j){ lo=Math.min(lo,mat[i][j]); hi=Math.max(hi,mat[i][j]); }
+  if (!isFinite(lo)) { lo=0; hi=1; }
+
+  let grid = `<div class="hm-wrap"><div class="hm-grid" style="grid-template-columns:${LBL}px repeat(${n},${CELL}px);grid-template-rows:${LBL}px repeat(${n},${CELL}px);">`;
+  grid += `<div style="width:${LBL}px;height:${LBL}px;"></div>`;
+  for (let j=0;j<n;j++) grid += `<div class="hm-lbl" style="width:${CELL}px;height:${LBL}px;">#${ok[j].index+1}</div>`;
+  for (let i=0;i<n;i++) {
+    grid += `<div class="hm-lbl" style="width:${LBL}px;height:${CELL}px;">#${ok[i].index+1}</div>`;
+    for (let j=0;j<n;j++) {
+      const v = mat[i][j];
+      if (i===j) {
+        grid += `<div class="hm-cell" style="width:${CELL}px;height:${CELL}px;background:#1e2d4e;color:var(--accent);">1.0</div>`;
+      } else {
+        const c = simColor(v, lo, hi);
+        grid += `<div class="hm-cell" style="width:${CELL}px;height:${CELL}px;background:${c.bg};color:${c.text};" title="#${ok[i].index+1} × #${ok[j].index+1}: ${v.toFixed(4)}">${CELL>=28?v.toFixed(2):''}</div>`;
+      }
+    }
+  }
+  grid += `</div></div>`;
+
+  const steps = 8;
+  const sw = Array.from({length:steps+1},(_,k)=>{
+    const c = simColor(lo+(hi-lo)*k/steps, lo, hi);
+    return `<div class="legend-swatch" style="background:${c.bg}"></div>`;
+  }).join('');
+  grid += `<div class="legend-bar"><span>${lo.toFixed(3)}</span><div class="legend-gradient">${sw}</div><span>${hi.toFixed(3)}</span><span style="margin-left:8px;">（対角=自己類似度）</span></div>`;
+
+  document.getElementById('embedResults').innerHTML = html + '<div class="separator"></div>' + grid;
+}
+
+// ─── Export / copy ───────────────────────────────────────────────────────────
+
+function copyReport() {
+  const model = getModel();
+  const lines = [`# Prompt Bench レポート`, ``, `モデル: ${model}`, `実行回数: ${currentResults.length}`, ``];
+  currentResults.forEach(r => {
+    lines.push(`## #${r.index+1}`);
+    if (r.error) { lines.push(`エラー: ${r.error}`); }
+    else {
+      lines.push(`レイテンシ: ${r.latencyMs.toFixed(0)}ms / トークン: ${r.totalTokens ?? '—'}`);
+      lines.push('```');
+      lines.push(r.content);
+      lines.push('```');
+    }
+    lines.push('');
+  });
+  const text = lines.join('\n');
+  navigator.clipboard.writeText(text).then(() => {
+    setMsg('globalMsg', 'レポートをクリップボードにコピーしました', 'success');
+  }).catch(() => {
+    setMsg('globalMsg', 'コピーに失敗しました', 'error');
+  });
+}
+
+function exportJSON() {
+  const payload = {
+    exportedAt: new Date().toISOString(),
+    model: getModel(),
+    baseUrl: document.getElementById('baseUrl').value.trim(),
+    systemPrompt: document.getElementById('systemPrompt').value,
+    userPrompt: document.getElementById('userPrompt').value,
+    params: {
+      temperature: parseFloat(document.getElementById('temperature').value),
+      top_p: parseFloat(document.getElementById('topP').value),
+      max_tokens: parseInt(document.getElementById('maxTokens').value, 10),
+      repeat: currentResults.length,
+    },
+    results: currentResults,
+    judge: judgeResults,
+  };
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `prompt-bench-${Date.now()}.json`;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+</script>
+</body>
+</html>
