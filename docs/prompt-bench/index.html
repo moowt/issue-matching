@@ -371,6 +371,20 @@
         <input type="text" id="embModel" value="text-embedding-3-small">
       </div>
     </div>
+
+    <label class="option-row">
+      <input type="checkbox" id="trendEnabled" onchange="toggleOption('trend')">
+      <span>
+        傾向分析でN個の出力をまとめてLLMに評価させる
+        <span class="info-icon">ⓘ<span class="tooltip">個別採点(Judge)や数値的な類似度(Embedding)とは別に、N個の出力すべてを1回のLLM呼び出しでまとめて読ませ、「共通する内容」「分岐している内容とその内訳」「分岐が表現の違いか、結論が変わるような実質的な違いか」を文章で要約させます。テスターが再現性の問題を判断する補助として使えます。</span></span>
+      </span>
+    </label>
+    <div class="option-body" id="trendBody">
+      <div class="form-group" style="max-width:360px;">
+        <label for="trendModel">分析モデル（空欄なら実行モデルと同じ）</label>
+        <input type="text" id="trendModel" list="modelList" placeholder="openai/gpt-oss-120b">
+      </div>
+    </div>
   </div>
 
   <!-- Run controls -->
@@ -414,6 +428,11 @@
       </div>
     </div>
 
+    <div class="card hidden" id="trendCard">
+      <div class="card-title">傾向分析（テスター向け）</div>
+      <div id="trendContent"></div>
+    </div>
+
     <div class="card">
       <div class="card-title" style="justify-content:space-between;">
         <span>各実行の結果</span>
@@ -433,6 +452,7 @@
 let stopRequested = false;
 let activeControllers = new Set();
 let runs = []; // { index, output, error, latencyMs, usage, judge, embVec }
+let trendResult = null; // { text, error }
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
@@ -655,6 +675,29 @@ async function judgeRun(baseUrl, apiKey, model, rubric, systemPrompt, userPrompt
   return { score: parsed.score, reason: parsed.reason ?? '', raw: res.content };
 }
 
+async function analyzeTrend(baseUrl, apiKey, model, systemPrompt, userPrompt, outputs, signal) {
+  const outputsBlock = outputs.map((o, i) => `### 実行 #${i + 1}\n${o}`).join('\n\n');
+  const trendMessages = [
+    { role: 'system', content: 'あなたはソフトウェアテスターの分析作業を支援するアシスタントです。同一の条件で複数回実行したLLMの出力群を読み、次の3点を日本語で簡潔にまとめてください。\n1. 共通している内容・一貫している点\n2. 出力間で分岐している内容と、その内訳（何パターンに分かれ、それぞれ何回か）\n3. その分岐が表現・言い回しの違いに過ぎないのか、結論や事実関係が変わるような実質的な違いなのか\nテスターがこの結果を見て「再現性に問題があるか」を判断できるように書いてください。' },
+    { role: 'user', content: `【元のシステムプロンプト】\n${systemPrompt || '(なし)'}\n\n【元のユーザープロンプト】\n${userPrompt}\n\n【各実行の出力】\n${outputsBlock}` },
+  ];
+  const trendParams = { temperature: 0, topP: 1, maxTokens: undefined };
+  const extra = {};
+  if (REASONING_MODEL_RE.test(model)) extra.reasoning_effort = 'low';
+
+  let res;
+  try {
+    res = await chatCompletion(baseUrl, apiKey, model, trendMessages, trendParams, signal, extra);
+  } catch (e) {
+    if (e.name === 'AbortError') throw e;
+    res = await chatCompletion(baseUrl, apiKey, model, trendMessages, trendParams, signal, {});
+  }
+  if (!res.content) {
+    return { text: null, error: '分析結果が空でした' };
+  }
+  return { text: res.content, error: null };
+}
+
 // ─── Concurrency-limited pool ───────────────────────────────────────────────
 
 async function runPool(n, worker, concurrency) {
@@ -699,6 +742,9 @@ async function runBench() {
   const embApiKey = document.getElementById('embApiKey').value.trim();
   const embModel = document.getElementById('embModel').value.trim();
 
+  const trendEnabled = document.getElementById('trendEnabled').checked;
+  const trendModel = document.getElementById('trendModel').value.trim() || model;
+
   if (!apiKey) return setMsg('APIキーを入力してください', 'error');
   if (!model) return setMsg('モデルを指定してください', 'error');
   if (!userPrompt) return setMsg('ユーザープロンプトを入力してください', 'error');
@@ -708,6 +754,8 @@ async function runBench() {
   stopRequested = false;
   activeControllers = new Set();
   runs = new Array(n).fill(null).map((_, i) => ({ index: i, output: null, error: null, latencyMs: null, usage: null, judge: null }));
+  trendResult = null;
+  document.getElementById('trendCard').classList.add('hidden');
 
   setMsg('', 'info');
   document.getElementById('runBtn').disabled = true;
@@ -768,8 +816,23 @@ async function runBench() {
       }
     }
 
+    if (trendEnabled && !stopRequested) {
+      const successfulOutputs = runs.filter(r => r.output != null).map(r => r.output);
+      if (successfulOutputs.length >= 2) {
+        setProgress(99, '傾向分析中…');
+        try {
+          trendResult = await analyzeTrend(baseUrl, apiKey, trendModel, systemPrompt, userPrompt, successfulOutputs);
+        } catch (e) {
+          trendResult = { text: null, error: describeError(e) };
+        }
+      } else {
+        trendResult = { text: null, error: '傾向分析には成功した実行が2件以上必要です' };
+      }
+    }
+
     setProgress(100, stopRequested ? '停止しました' : '完了');
     renderSummary(n, judgeEnabled, embEnabled);
+    renderTrendCard(trendEnabled);
     document.getElementById('results').classList.remove('hidden');
   } finally {
     syncApiKeyGating();
@@ -877,6 +940,21 @@ function renderSummary(n, judgeEnabled, embEnabled) {
     if (vecs.length >= 2) renderHeatmap(vecs);
   } else {
     document.getElementById('embSection').classList.add('hidden');
+  }
+}
+
+function renderTrendCard(trendEnabled) {
+  const card = document.getElementById('trendCard');
+  if (!trendEnabled || !trendResult) {
+    card.classList.add('hidden');
+    return;
+  }
+  card.classList.remove('hidden');
+  const content = document.getElementById('trendContent');
+  if (trendResult.error) {
+    content.innerHTML = `<div class="status status-error">${escapeHtml(trendResult.error)}</div>`;
+  } else {
+    content.innerHTML = `<div class="run-out">${escapeHtml(trendResult.text)}</div>`;
   }
 }
 
@@ -1039,6 +1117,12 @@ function generateMarkdownReport() {
     lines.push('', '```', r.output ?? '', '```', '');
   });
 
+  if (document.getElementById('trendEnabled').checked && trendResult) {
+    lines.push('## 傾向分析（テスター向け）', '');
+    if (trendResult.error) lines.push(`エラー: ${trendResult.error}`, '');
+    else lines.push(trendResult.text, '');
+  }
+
   return lines.join('\n');
 }
 
@@ -1075,11 +1159,14 @@ function exportJSON() {
       rubric: document.getElementById('rubric').value,
       embEnabled: document.getElementById('embEnabled').checked,
       embModel: document.getElementById('embModel').value,
+      trendEnabled: document.getElementById('trendEnabled').checked,
+      trendModel: document.getElementById('trendModel').value,
     },
     runs: runs.map(r => ({
       index: r.index, output: r.output, error: r.error, latencyMs: r.latencyMs,
       usage: r.usage, finishReason: r.finishReason, judge: r.judge,
     })),
+    trendAnalysis: document.getElementById('trendEnabled').checked ? trendResult : null,
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
