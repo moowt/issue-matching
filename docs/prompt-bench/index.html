@@ -304,7 +304,7 @@
       </div>
     </div>
 
-    <button type="button" class="btn btn-ghost" id="advParamsBtn" onclick="toggleAdvancedParams()">+ 詳細パラメータ（top_p / max_tokens）</button>
+    <button type="button" class="btn btn-ghost" id="advParamsBtn" onclick="toggleAdvancedParams()">+ 詳細パラメータ（top_p / max_tokens / Structured Output）</button>
     <div class="option-body" id="advParamsBody">
       <label class="option-row">
         <input type="checkbox" id="topPEnabled" onchange="toggleParamInput('topP')">
@@ -325,6 +325,59 @@
       </label>
       <div class="form-group" style="max-width:200px;margin-top:8px;">
         <input type="number" id="maxTokens" value="4096" min="1" max="32768" step="1" disabled>
+      </div>
+
+      <label class="option-row">
+        <input type="checkbox" id="structuredOutputEnabled" onchange="toggleStructuredOutputBody()">
+        <span>
+          Structured Outputを指定する
+          <span class="info-icon">ⓘ<span class="tooltip">response_formatでモデルの出力形式を強制します。「JSONモード」はJSON以外を出力させない緩い制約、「JSON Schema」はプロパティ・型・必須項目まで厳密に強制します。対応状況・遵守の確実性はモデル/プロバイダにより差があり、指定しても無視される場合があります。</span></span>
+        </span>
+      </label>
+      <div class="option-body" id="structuredOutputBody">
+        <div class="form-group" style="max-width:280px;">
+          <label for="structuredOutputMode">モード</label>
+          <select id="structuredOutputMode" onchange="toggleJsonSchemaFields()">
+            <option value="json_object">JSONモード（json_object）</option>
+            <option value="json_schema">JSON Schema（json_schema・厳密）</option>
+          </select>
+        </div>
+        <div id="jsonSchemaFields" class="hidden">
+          <div class="form-group" style="max-width:280px;">
+            <label for="jsonSchemaName">スキーマ名</label>
+            <input type="text" id="jsonSchemaName" value="output" placeholder="output">
+          </div>
+          <div class="form-group">
+            <label for="jsonSchemaText">
+              JSON Schema
+              <span class="info-icon">ⓘ<span class="tooltip">例:
+{
+  "type": "object",
+  "properties": {
+    "answer": {"type": "string"},
+    "confidence": {"type": "number"}
+  },
+  "required": ["answer", "confidence"],
+  "additionalProperties": false
+}
+
+strictモードでは全プロパティをrequiredに含め、additionalProperties: falseを指定する必要があります。</span></span>
+            </label>
+            <textarea id="jsonSchemaText" rows="9" placeholder='{
+  "type": "object",
+  "properties": {
+    "answer": {"type": "string"},
+    "confidence": {"type": "number"}
+  },
+  "required": ["answer", "confidence"],
+  "additionalProperties": false
+}'></textarea>
+          </div>
+          <label class="option-row">
+            <input type="checkbox" id="jsonSchemaStrict" checked>
+            <span>strictモード（additionalProperties:falseと全プロパティのrequired化が前提）</span>
+          </label>
+        </div>
       </div>
     </div>
   </div>
@@ -385,6 +438,14 @@
         <input type="text" id="trendModel" list="modelList" placeholder="openai/gpt-oss-120b">
       </div>
     </div>
+
+    <label class="option-row">
+      <input type="checkbox" id="jsonCheckEnabled">
+      <span>
+        出力のJSON形式を検証する
+        <span class="info-icon">ⓘ<span class="tooltip">LLM呼び出しなしで、各出力をこの場でパースして「途中で切れていないか」「同じキーが複数出現していないか」をチェックします（JSON.parseは重複キーを無言で上書きしてしまうため、専用の簡易パーサーで検出します）。出力がMarkdownの```json フェンスで囲まれている場合は中身だけを検証します。JSON以外の出力は対象外として扱います。</span></span>
+      </span>
+    </label>
   </div>
 
   <!-- Run controls -->
@@ -477,12 +538,22 @@ function toggleOption(name) {
 function toggleAdvancedParams() {
   const body = document.getElementById('advParamsBody');
   const open = body.classList.toggle('open');
-  document.getElementById('advParamsBtn').textContent = (open ? '− ' : '+ ') + '詳細パラメータ（top_p / max_tokens）';
+  document.getElementById('advParamsBtn').textContent = (open ? '− ' : '+ ') + '詳細パラメータ（top_p / max_tokens / Structured Output）';
 }
 
 function toggleParamInput(name) {
   const enabled = document.getElementById(name + 'Enabled').checked;
   document.getElementById(name).disabled = !enabled;
+}
+
+function toggleStructuredOutputBody() {
+  const enabled = document.getElementById('structuredOutputEnabled').checked;
+  document.getElementById('structuredOutputBody').classList.toggle('open', enabled);
+}
+
+function toggleJsonSchemaFields() {
+  const isSchema = document.getElementById('structuredOutputMode').value === 'json_schema';
+  document.getElementById('jsonSchemaFields').classList.toggle('hidden', !isSchema);
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -643,6 +714,133 @@ function parseJudgeJson(text) {
   return null;
 }
 
+// ─── Strict JSON validator ──────────────────────────────────────────────────
+// JSON.parse silently accepts duplicate keys (last one wins) and gives no
+// structured info about truncation, so a small hand-rolled parser is used to
+// surface both instead of just "valid" / "invalid".
+
+function stripCodeFence(text) {
+  const fence = text.trim().match(/```(?:json)?\s*([\s\S]*?)```/i);
+  return fence ? fence[1].trim() : text.trim();
+}
+
+function validateJsonStrict(rawText) {
+  const text = stripCodeFence(rawText ?? '');
+  if (!text || !/^[\[{]/.test(text)) {
+    return { looksLikeJson: false, valid: false, truncated: false, duplicateKeys: [], error: null };
+  }
+
+  let i = 0;
+  const n = text.length;
+  const duplicateKeys = [];
+  const atEnd = () => i >= n;
+  const fail = (msg) => { throw new Error(msg); };
+  const skipWs = () => { while (i < n && /\s/.test(text[i])) i++; };
+
+  function parseValue() {
+    skipWs();
+    if (atEnd()) fail('unexpected end of input');
+    const c = text[i];
+    if (c === '{') return parseObject();
+    if (c === '[') return parseArray();
+    if (c === '"') return parseString();
+    if (c === '-' || (c >= '0' && c <= '9')) return parseNumber();
+    if (text.startsWith('true', i)) { i += 4; return; }
+    if (text.startsWith('false', i)) { i += 5; return; }
+    if (text.startsWith('null', i)) { i += 4; return; }
+    fail(`unexpected token "${c}" at position ${i}`);
+  }
+
+  function parseObject() {
+    i++;
+    const seen = new Set();
+    skipWs();
+    if (!atEnd() && text[i] === '}') { i++; return; }
+    while (true) {
+      skipWs();
+      if (atEnd()) fail('unexpected end of input');
+      if (text[i] !== '"') fail(`expected string key at position ${i}`);
+      const key = parseString();
+      if (seen.has(key)) duplicateKeys.push(key);
+      seen.add(key);
+      skipWs();
+      if (atEnd()) fail('unexpected end of input');
+      if (text[i] !== ':') fail(`expected ":" at position ${i}`);
+      i++;
+      parseValue();
+      skipWs();
+      if (atEnd()) fail('unexpected end of input');
+      if (text[i] === ',') { i++; continue; }
+      if (text[i] === '}') { i++; break; }
+      fail(`expected "," or "}" at position ${i}`);
+    }
+  }
+
+  function parseArray() {
+    i++;
+    skipWs();
+    if (!atEnd() && text[i] === ']') { i++; return; }
+    while (true) {
+      parseValue();
+      skipWs();
+      if (atEnd()) fail('unexpected end of input');
+      if (text[i] === ',') { i++; continue; }
+      if (text[i] === ']') { i++; break; }
+      fail(`expected "," or "]" at position ${i}`);
+    }
+  }
+
+  function parseString() {
+    i++;
+    let s = '';
+    while (true) {
+      if (atEnd()) fail('unexpected end of input');
+      const c = text[i];
+      if (c === '"') { i++; return s; }
+      if (c === '\\') {
+        i++;
+        if (atEnd()) fail('unexpected end of input');
+        const e = text[i];
+        if (e === 'u') {
+          if (i + 5 > n) fail('unexpected end of input');
+          s += text.slice(i - 1, i + 5);
+          i += 5;
+        } else { s += e; i++; }
+      } else { s += c; i++; }
+    }
+  }
+
+  function parseNumber() {
+    const start = i;
+    if (text[i] === '-') i++;
+    while (i < n && text[i] >= '0' && text[i] <= '9') i++;
+    if (text[i] === '.') { i++; while (i < n && text[i] >= '0' && text[i] <= '9') i++; }
+    if (text[i] === 'e' || text[i] === 'E') {
+      i++;
+      if (text[i] === '+' || text[i] === '-') i++;
+      while (i < n && text[i] >= '0' && text[i] <= '9') i++;
+    }
+    if (i === start) fail(`invalid number at position ${i}`);
+  }
+
+  let error = null;
+  try {
+    parseValue();
+    skipWs();
+    if (!atEnd()) fail(`unexpected trailing content at position ${i}`);
+  } catch (e) {
+    error = e.message;
+  }
+
+  return {
+    looksLikeJson: true,
+    valid: error === null && duplicateKeys.length === 0,
+    truncated: error != null && /unexpected end of input/.test(error),
+    duplicateKeys: [...new Set(duplicateKeys)],
+    error,
+  };
+}
+
 const REASONING_MODEL_RE = /^openai\/gpt-oss/i;
 
 async function judgeRun(baseUrl, apiKey, model, rubric, systemPrompt, userPrompt, output, signal) {
@@ -745,15 +943,36 @@ async function runBench() {
   const trendEnabled = document.getElementById('trendEnabled').checked;
   const trendModel = document.getElementById('trendModel').value.trim() || model;
 
+  const jsonCheckEnabled = document.getElementById('jsonCheckEnabled').checked;
+
+  const structuredOutputEnabled = document.getElementById('structuredOutputEnabled').checked;
+  const structuredOutputMode = document.getElementById('structuredOutputMode').value;
+  const jsonSchemaName = document.getElementById('jsonSchemaName').value.trim() || 'output';
+  const jsonSchemaStrict = document.getElementById('jsonSchemaStrict').checked;
+  const jsonSchemaText = document.getElementById('jsonSchemaText').value.trim();
+
   if (!apiKey) return setMsg('APIキーを入力してください', 'error');
   if (!model) return setMsg('モデルを指定してください', 'error');
   if (!userPrompt) return setMsg('ユーザープロンプトを入力してください', 'error');
   if (judgeEnabled && !rubric) return setMsg('LLM-as-Judgeを有効にする場合は採点基準を入力してください', 'error');
   if (embEnabled && (!embApiKey || !embModel)) return setMsg('Embeddingを有効にする場合はEmbedding APIキーとモデルを入力してください', 'error');
 
+  let executionExtra = {};
+  if (structuredOutputEnabled) {
+    if (structuredOutputMode === 'json_object') {
+      executionExtra = { response_format: { type: 'json_object' } };
+    } else {
+      if (!jsonSchemaText) return setMsg('Structured OutputでJSON Schemaモードを使う場合はスキーマを入力してください', 'error');
+      let schemaObj;
+      try { schemaObj = JSON.parse(jsonSchemaText); }
+      catch (e) { return setMsg(`JSON Schemaの構文が不正です: ${e.message}`, 'error'); }
+      executionExtra = { response_format: { type: 'json_schema', json_schema: { name: jsonSchemaName, strict: jsonSchemaStrict, schema: schemaObj } } };
+    }
+  }
+
   stopRequested = false;
   activeControllers = new Set();
-  runs = new Array(n).fill(null).map((_, i) => ({ index: i, output: null, error: null, latencyMs: null, usage: null, judge: null }));
+  runs = new Array(n).fill(null).map((_, i) => ({ index: i, output: null, error: null, latencyMs: null, usage: null, judge: null, jsonCheck: null }));
   trendResult = null;
   document.getElementById('trendCard').classList.add('hidden');
 
@@ -777,11 +996,12 @@ async function runBench() {
       const controller = new AbortController();
       activeControllers.add(controller);
       try {
-        const res = await chatCompletion(baseUrl, apiKey, model, messages, params, controller.signal);
+        const res = await chatCompletion(baseUrl, apiKey, model, messages, params, controller.signal, executionExtra);
         runs[i].output = res.content;
         runs[i].finishReason = res.finishReason;
         runs[i].latencyMs = res.latencyMs;
         runs[i].usage = res.usage;
+        if (jsonCheckEnabled) runs[i].jsonCheck = validateJsonStrict(res.content);
       } catch (e) {
         if (e.name === 'AbortError') { runs[i].error = '停止されました'; }
         else { runs[i].error = describeError(e); }
@@ -831,7 +1051,7 @@ async function runBench() {
     }
 
     setProgress(100, stopRequested ? '停止しました' : '完了');
-    renderSummary(n, judgeEnabled, embEnabled);
+    renderSummary(n, judgeEnabled, embEnabled, jsonCheckEnabled);
     renderTrendCard(trendEnabled);
     document.getElementById('results').classList.remove('hidden');
   } finally {
@@ -865,6 +1085,17 @@ function renderRunListSkeleton(n) {
   }
 }
 
+function jsonCheckChipHtml(jc) {
+  if (!jc) return '';
+  if (!jc.looksLikeJson) return `<span class="run-meta-chip" style="color:var(--text2);">JSON対象外</span>`;
+  if (jc.valid) return `<span class="run-meta-chip" style="color:var(--success);">JSON: OK</span>`;
+  const reasons = [];
+  if (jc.truncated) reasons.push('途中で切れている');
+  if (jc.duplicateKeys.length) reasons.push(`キー重複(${jc.duplicateKeys.join(', ')})`);
+  if (!jc.truncated && !jc.duplicateKeys.length) reasons.push('構文エラー');
+  return `<span class="run-meta-chip" style="color:var(--danger);" title="${escapeHtml(jc.error || '')}">JSON不正: ${escapeHtml(reasons.join('・'))}</span>`;
+}
+
 function renderRunCard(i) {
   const r = runs[i];
   const el = document.getElementById('run_' + i);
@@ -882,6 +1113,7 @@ function renderRunCard(i) {
     `<span class="run-meta-chip">${r.latencyMs != null ? Math.round(r.latencyMs) + ' ms' : '-'}</span>`,
     `<span class="run-meta-chip">prompt:${u.prompt_tokens ?? '-'} / completion:${u.completion_tokens ?? '-'} / total:${u.total_tokens ?? '-'}</span>`,
     r.finishReason ? `<span class="run-meta-chip">finish:${escapeHtml(r.finishReason)}</span>` : '',
+    jsonCheckChipHtml(r.jsonCheck),
   ].join('');
 
   let judgeHtml = '';
@@ -902,7 +1134,7 @@ function renderRunCard(i) {
     ${judgeHtml}`;
 }
 
-function renderSummary(n, judgeEnabled, embEnabled) {
+function renderSummary(n, judgeEnabled, embEnabled, jsonCheckEnabled) {
   const ok = runs.filter(r => r.output != null);
   const latencies = ok.map(r => r.latencyMs).filter(v => v != null);
   const completionTokens = ok.map(r => r.usage?.completion_tokens).filter(v => v != null);
@@ -914,6 +1146,10 @@ function renderSummary(n, judgeEnabled, embEnabled) {
     { val: completionTokens.length ? Math.round(mean(completionTokens)) : '-', lbl: '平均出力トークン数' },
   ];
   if (judgeEnabled) cards.push({ val: scores.length ? mean(scores).toFixed(2) : '-', lbl: 'Judge平均スコア' });
+  if (jsonCheckEnabled && ok.length) {
+    const validCount = ok.filter(r => r.jsonCheck?.valid).length;
+    cards.push({ val: `${validCount}/${ok.length}`, lbl: 'JSON妥当率' });
+  }
   if (embEnabled) {
     const vecs = ok.map(r => r.embVec).filter(Boolean);
     let simMean = '-';
@@ -1063,6 +1299,9 @@ function generateMarkdownReport() {
   const maxTokens = document.getElementById('maxTokensEnabled').checked ? document.getElementById('maxTokens').value : '(未指定・既定値)';
   const judgeEnabled = document.getElementById('judgeEnabled').checked;
   const embEnabled = document.getElementById('embEnabled').checked;
+  const jsonCheckEnabled = document.getElementById('jsonCheckEnabled').checked;
+  const structuredOutputEnabled = document.getElementById('structuredOutputEnabled').checked;
+  const structuredOutputMode = document.getElementById('structuredOutputMode').value;
 
   const ok = runs.filter(r => r.output != null);
   const latencies = ok.map(r => r.latencyMs).filter(v => v != null);
@@ -1082,6 +1321,7 @@ function generateMarkdownReport() {
   lines.push(`| top_p | ${topP} |`);
   lines.push(`| max_tokens | ${maxTokens} |`);
   lines.push(`| 繰り返し回数 | ${runs.length} |`);
+  if (structuredOutputEnabled) lines.push(`| Structured Output | ${structuredOutputMode} |`);
   lines.push('');
   lines.push('### システムプロンプト', '', '```', systemPrompt || '(なし)', '```', '');
   lines.push('### ユーザープロンプト', '', '```', userPrompt, '```', '');
@@ -1096,6 +1336,10 @@ function generateMarkdownReport() {
     const sims = [];
     for (let i = 0; i < vecs.length; i++) for (let j = i+1; j < vecs.length; j++) sims.push(cosSim(vecs[i], vecs[j]));
     lines.push(`| Embedding平均類似度 | ${mean(sims).toFixed(4)} |`);
+  }
+  if (jsonCheckEnabled && ok.length) {
+    const validCount = ok.filter(r => r.jsonCheck?.valid).length;
+    lines.push(`| JSON妥当率 | ${validCount}/${ok.length} |`);
   }
   lines.push('');
 
@@ -1113,6 +1357,16 @@ function generateMarkdownReport() {
     if (r.judge) {
       if (r.judge.error) lines.push(`- Judge: エラー（${r.judge.error}）`);
       else if (r.judge.score != null) lines.push(`- Judgeスコア: ${r.judge.score}/10 — ${r.judge.reason || ''}`);
+    }
+    if (r.jsonCheck) {
+      if (!r.jsonCheck.looksLikeJson) lines.push(`- JSON検証: 対象外（JSON形式ではない出力）`);
+      else if (r.jsonCheck.valid) lines.push(`- JSON検証: OK`);
+      else {
+        const reasons = [];
+        if (r.jsonCheck.error) reasons.push(r.jsonCheck.error);
+        if (r.jsonCheck.duplicateKeys.length) reasons.push(`重複キー: ${r.jsonCheck.duplicateKeys.join(', ')}`);
+        lines.push(`- JSON検証: 不正（${reasons.join('、')}）`);
+      }
     }
     lines.push('', '```', r.output ?? '', '```', '');
   });
@@ -1161,10 +1415,16 @@ function exportJSON() {
       embModel: document.getElementById('embModel').value,
       trendEnabled: document.getElementById('trendEnabled').checked,
       trendModel: document.getElementById('trendModel').value,
+      jsonCheckEnabled: document.getElementById('jsonCheckEnabled').checked,
+      structuredOutputEnabled: document.getElementById('structuredOutputEnabled').checked,
+      structuredOutputMode: document.getElementById('structuredOutputMode').value,
+      jsonSchemaName: document.getElementById('jsonSchemaName').value,
+      jsonSchemaStrict: document.getElementById('jsonSchemaStrict').checked,
+      jsonSchemaText: document.getElementById('jsonSchemaText').value,
     },
     runs: runs.map(r => ({
       index: r.index, output: r.output, error: r.error, latencyMs: r.latencyMs,
-      usage: r.usage, finishReason: r.finishReason, judge: r.judge,
+      usage: r.usage, finishReason: r.finishReason, judge: r.judge, jsonCheck: r.jsonCheck,
     })),
     trendAnalysis: document.getElementById('trendEnabled').checked ? trendResult : null,
   };
