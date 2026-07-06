@@ -257,7 +257,7 @@
       <button class="btn btn-ghost" id="fetchModelsBtn" onclick="fetchModels()">モデル一覧を取得</button>
       <span id="modelFetchStatus" style="font-size:13px;"></span>
     </div>
-    <div class="card-note" id="providerNote">APIキーは console.groq.com で取得。gpt-oss-120bは $0.15 / $0.60 per 1M tok（入力/出力）と低コスト。</div>
+    <div class="card-note" id="providerNote"></div>
     <div class="card-note">
       APIキーはJS変数（メモリ上）にのみ保持し、ページを閉じると消去されます。localStorage等への保存は行いません。
       ブラウザから直接APIへリクエストするため、Origin制限のあるプロバイダでは失敗する場合があります（実行時にCORSエラーの案内を表示します）。
@@ -484,7 +484,7 @@ const PROVIDER_PRESETS = {
     baseUrl: 'https://api.groq.com/openai/v1',
     models: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
     defaultModel: 'openai/gpt-oss-120b',
-    note: 'APIキーは console.groq.com で取得。gpt-oss-120bは $0.15 / $0.60 per 1M tok（入力/出力）と低コスト。',
+    note: 'APIキーは console.groq.com で取得（無料・カード登録不要）。無料枠は全モデル利用可能だが、リクエスト数（分単位・日単位）とトークン数（分単位）の両方に上限があり、モデルごとに異なる（最新値は console.groq.com/docs/rate-limits を参照）。従量課金にするとこの上限が大きく緩和され、gpt-oss-120bは $0.15 / $0.60 per 1M tok（入力/出力）と低コスト。',
   },
   openrouter: {
     baseUrl: 'https://openrouter.ai/api/v1',
@@ -509,10 +509,8 @@ const PROVIDER_PRESETS = {
 function applyProviderPreset() {
   const key = document.getElementById('providerPreset').value;
   const preset = PROVIDER_PRESETS[key];
-  if (key !== 'custom') {
-    document.getElementById('baseUrl').value = preset.baseUrl;
-    document.getElementById('modelInput').value = preset.defaultModel;
-  }
+  document.getElementById('baseUrl').value = preset.baseUrl;
+  document.getElementById('modelInput').value = preset.defaultModel;
   document.getElementById('modelList').innerHTML = preset.models.map(id => `<option value="${escapeHtml(id)}">`).join('');
   document.getElementById('providerNote').textContent = preset.note;
 }
@@ -1094,6 +1092,7 @@ function exportJSON() {
 
 // ─── Init ───────────────────────────────────────────────────────────────────
 
+applyProviderPreset();
 syncApiKeyGating();
 </script>
 </body>
