@@ -416,7 +416,10 @@
     <div class="card">
       <div class="card-title" style="justify-content:space-between;">
         <span>各実行の結果</span>
-        <button class="btn btn-ghost" onclick="exportJSON()" style="font-size:12px;padding:5px 14px;">JSONエクスポート</button>
+        <span style="display:flex; gap:8px;">
+          <button class="btn btn-ghost" id="copyReportBtn" onclick="copyReport()" style="font-size:12px;padding:5px 14px;">結果をコピー</button>
+          <button class="btn btn-ghost" onclick="exportJSON()" style="font-size:12px;padding:5px 14px;">JSONエクスポート</button>
+        </span>
       </div>
       <div id="runList"></div>
     </div>
@@ -620,7 +623,7 @@ async function judgeRun(baseUrl, apiKey, model, rubric, systemPrompt, userPrompt
     { role: 'system', content: 'あなたは公平で厳格な評価者です。与えられた採点基準に従い出力を1〜10点の整数で採点し、必ず次のJSON形式のみで回答してください。他のテキストは含めないでください。\n{"score": <1-10の整数>, "reason": "<日本語で60字程度の理由>"}' },
     { role: 'user', content: `【採点基準】\n${rubric}\n\n【元のシステムプロンプト】\n${systemPrompt || '(なし)'}\n\n【元のユーザープロンプト】\n${userPrompt}\n\n【評価対象の出力】\n${output}` },
   ];
-  const judgeParams = { temperature: 0, topP: 1, maxTokens: 1024 };
+  const judgeParams = { temperature: 0, topP: 1, maxTokens: undefined };
   const extra = { response_format: { type: 'json_object' } };
   if (REASONING_MODEL_RE.test(model)) extra.reasoning_effort = 'low';
 
@@ -949,6 +952,89 @@ function renderHeatmap(vecs) {
       cell.title = `#${i+1} × #${j+1}: ${mat[i][j].toFixed(4)}`;
       container.appendChild(cell);
     }
+  }
+}
+
+// ─── Markdown report / clipboard copy ──────────────────────────────────────
+
+function generateMarkdownReport() {
+  const baseUrl = document.getElementById('baseUrl').value;
+  const model = document.getElementById('modelInput').value;
+  const systemPrompt = document.getElementById('systemPrompt').value;
+  const userPrompt = document.getElementById('userPrompt').value;
+  const temperature = document.getElementById('temperature').value;
+  const topP = document.getElementById('topPEnabled').checked ? document.getElementById('topP').value : '(未指定・既定値)';
+  const maxTokens = document.getElementById('maxTokensEnabled').checked ? document.getElementById('maxTokens').value : '(未指定・既定値)';
+  const judgeEnabled = document.getElementById('judgeEnabled').checked;
+  const embEnabled = document.getElementById('embEnabled').checked;
+
+  const ok = runs.filter(r => r.output != null);
+  const latencies = ok.map(r => r.latencyMs).filter(v => v != null);
+  const completionTokens = ok.map(r => r.usage?.completion_tokens).filter(v => v != null);
+  const scores = ok.map(r => r.judge?.score).filter(v => typeof v === 'number');
+  const vecs = ok.map(r => r.embVec).filter(Boolean);
+
+  const lines = [];
+  lines.push('# Prompt Bench 実行結果', '');
+  lines.push(`実行日時: ${new Date().toLocaleString('ja-JP')}`, '');
+
+  lines.push('## 設定', '');
+  lines.push('| 項目 | 値 |', '|---|---|');
+  lines.push(`| Base URL | ${baseUrl} |`);
+  lines.push(`| モデル | ${model} |`);
+  lines.push(`| temperature | ${temperature} |`);
+  lines.push(`| top_p | ${topP} |`);
+  lines.push(`| max_tokens | ${maxTokens} |`);
+  lines.push(`| 繰り返し回数 | ${runs.length} |`);
+  lines.push('');
+  lines.push('### システムプロンプト', '', '```', systemPrompt || '(なし)', '```', '');
+  lines.push('### ユーザープロンプト', '', '```', userPrompt, '```', '');
+
+  lines.push('## サマリー', '');
+  lines.push('| 指標 | 値 |', '|---|---|');
+  lines.push(`| 成功 / 総実行数 | ${ok.length}/${runs.length} |`);
+  if (latencies.length) lines.push(`| 平均レイテンシ | ${Math.round(mean(latencies))} ms |`);
+  if (completionTokens.length) lines.push(`| 平均出力トークン数 | ${Math.round(mean(completionTokens))} |`);
+  if (judgeEnabled && scores.length) lines.push(`| Judge平均スコア | ${mean(scores).toFixed(2)} |`);
+  if (embEnabled && vecs.length >= 2) {
+    const sims = [];
+    for (let i = 0; i < vecs.length; i++) for (let j = i+1; j < vecs.length; j++) sims.push(cosSim(vecs[i], vecs[j]));
+    lines.push(`| Embedding平均類似度 | ${mean(sims).toFixed(4)} |`);
+  }
+  lines.push('');
+
+  lines.push('## 各実行の結果', '');
+  runs.forEach((r, i) => {
+    lines.push(`### 実行 #${i+1}`, '');
+    if (r.error) {
+      lines.push(`エラー: ${r.error}`, '');
+      return;
+    }
+    const u = r.usage || {};
+    lines.push(`- レイテンシ: ${r.latencyMs != null ? Math.round(r.latencyMs) + ' ms' : '-'}`);
+    lines.push(`- トークン数: prompt ${u.prompt_tokens ?? '-'} / completion ${u.completion_tokens ?? '-'} / total ${u.total_tokens ?? '-'}`);
+    if (r.finishReason) lines.push(`- finish_reason: ${r.finishReason}`);
+    if (r.judge) {
+      if (r.judge.error) lines.push(`- Judge: エラー（${r.judge.error}）`);
+      else if (r.judge.score != null) lines.push(`- Judgeスコア: ${r.judge.score}/10 — ${r.judge.reason || ''}`);
+    }
+    lines.push('', '```', r.output ?? '', '```', '');
+  });
+
+  return lines.join('\n');
+}
+
+async function copyReport() {
+  if (!runs.length) return setMsg('コピーする実行結果がありません', 'warn');
+  const md = generateMarkdownReport();
+  const btn = document.getElementById('copyReportBtn');
+  const orig = btn.textContent;
+  try {
+    await navigator.clipboard.writeText(md);
+    btn.textContent = 'コピーしました！';
+    setTimeout(() => { btn.textContent = orig; }, 2000);
+  } catch (e) {
+    setMsg('クリップボードへのコピーに失敗しました', 'error');
   }
 }
 
