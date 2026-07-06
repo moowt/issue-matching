@@ -556,7 +556,17 @@ function toggleJsonSchemaFields() {
   document.getElementById('jsonSchemaFields').classList.toggle('hidden', !isSchema);
 }
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    if (!signal) return;
+    if (signal.aborted) { clearTimeout(t); reject(Object.assign(new Error('Aborted'), { name: 'AbortError' })); return; }
+    signal.addEventListener('abort', () => {
+      clearTimeout(t);
+      reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+    }, { once: true });
+  });
+}
 
 function cosSim(a, b) {
   let dot = 0, na = 0, nb = 0;
@@ -650,8 +660,12 @@ function describeError(e) {
   return e.message || String(e);
 }
 
-async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, extra = {}) {
-  const maxRetries = 5;
+async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, extra = {}, onRetry) {
+  // 429 (rate limit) is retried until it succeeds, the caller aborts (Stop
+  // button), or the safety ceiling below is hit — a low fixed retry count
+  // gives up long before a tight per-minute token budget actually resets.
+  const maxRetries = 100;
+  const maxFallbackWaitMs = 60000;
   let attempt = 0;
   while (true) {
     const start = performance.now();
@@ -669,9 +683,10 @@ async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, 
     }
     if (r.status === 429 && attempt < maxRetries) {
       const retryAfter = parseFloat(r.headers.get('retry-after'));
-      const waitMs = !isNaN(retryAfter) ? retryAfter * 1000 : 2000 * Math.pow(2, attempt);
+      const waitMs = !isNaN(retryAfter) ? retryAfter * 1000 : Math.min(2000 * Math.pow(2, attempt), maxFallbackWaitMs);
       attempt++;
-      await sleep(waitMs);
+      if (onRetry) onRetry(waitMs, attempt);
+      await sleep(waitMs, signal);
       continue;
     }
     const latencyMs = performance.now() - start;
@@ -680,11 +695,16 @@ async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, 
       throw new Error(`API ${r.status}: ${e.error?.message || r.statusText}`);
     }
     const data = await r.json();
+    const remainingTokens = parseInt(r.headers.get('x-ratelimit-remaining-tokens'), 10);
     return {
       content: data.choices?.[0]?.message?.content ?? '',
       finishReason: data.choices?.[0]?.finish_reason ?? null,
       usage: data.usage ?? null,
       latencyMs,
+      rateLimit: !isNaN(remainingTokens) ? {
+        remainingTokens,
+        resetTokens: r.headers.get('x-ratelimit-reset-tokens'),
+      } : null,
     };
   }
 }
@@ -996,11 +1016,13 @@ async function runBench() {
       const controller = new AbortController();
       activeControllers.add(controller);
       try {
-        const res = await chatCompletion(baseUrl, apiKey, model, messages, params, controller.signal, executionExtra);
+        const res = await chatCompletion(baseUrl, apiKey, model, messages, params, controller.signal, executionExtra,
+          (waitMs, attempt) => updateProgress(`実行 ${i+1}/${n}: レート制限中… ${Math.ceil(waitMs/1000)}秒後に再試行（${attempt}回目、「停止」でキャンセル可）`));
         runs[i].output = res.content;
         runs[i].finishReason = res.finishReason;
         runs[i].latencyMs = res.latencyMs;
         runs[i].usage = res.usage;
+        runs[i].rateLimit = res.rateLimit;
         if (jsonCheckEnabled) runs[i].jsonCheck = validateJsonStrict(res.content);
       } catch (e) {
         if (e.name === 'AbortError') { runs[i].error = '停止されました'; }
@@ -1113,6 +1135,7 @@ function renderRunCard(i) {
     `<span class="run-meta-chip">${r.latencyMs != null ? Math.round(r.latencyMs) + ' ms' : '-'}</span>`,
     `<span class="run-meta-chip">prompt:${u.prompt_tokens ?? '-'} / completion:${u.completion_tokens ?? '-'} / total:${u.total_tokens ?? '-'}</span>`,
     r.finishReason ? `<span class="run-meta-chip">finish:${escapeHtml(r.finishReason)}</span>` : '',
+    r.rateLimit ? `<span class="run-meta-chip" title="1分あたりのトークン残数（プロバイダ申告値）">残TPM:${r.rateLimit.remainingTokens}</span>` : '',
     jsonCheckChipHtml(r.jsonCheck),
   ].join('');
 
