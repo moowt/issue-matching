@@ -549,7 +549,7 @@ function describeError(e) {
   return e.message || String(e);
 }
 
-async function chatCompletion(baseUrl, apiKey, model, messages, params, signal) {
+async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, extra = {}) {
   const maxRetries = 5;
   let attempt = 0;
   while (true) {
@@ -559,7 +559,7 @@ async function chatCompletion(baseUrl, apiKey, model, messages, params, signal) 
       r = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model, messages, temperature: params.temperature, top_p: params.topP, max_tokens: params.maxTokens }),
+        body: JSON.stringify({ model, messages, temperature: params.temperature, top_p: params.topP, max_tokens: params.maxTokens, ...extra }),
         signal,
       });
     } catch (e) {
@@ -603,21 +603,44 @@ async function embedTexts(baseUrl, apiKey, model, texts) {
 }
 
 function parseJudgeJson(text) {
-  try { return JSON.parse(text); } catch {}
-  const m = text.match(/\{[\s\S]*\}/);
+  if (!text) return null;
+  let t = text.trim();
+  const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) t = fence[1].trim();
+  try { return JSON.parse(t); } catch {}
+  const m = t.match(/\{[\s\S]*\}/);
   if (m) { try { return JSON.parse(m[0]); } catch {} }
   return null;
 }
+
+const REASONING_MODEL_RE = /^openai\/gpt-oss/i;
 
 async function judgeRun(baseUrl, apiKey, model, rubric, systemPrompt, userPrompt, output, signal) {
   const judgeMessages = [
     { role: 'system', content: 'あなたは公平で厳格な評価者です。与えられた採点基準に従い出力を1〜10点の整数で採点し、必ず次のJSON形式のみで回答してください。他のテキストは含めないでください。\n{"score": <1-10の整数>, "reason": "<日本語で60字程度の理由>"}' },
     { role: 'user', content: `【採点基準】\n${rubric}\n\n【元のシステムプロンプト】\n${systemPrompt || '(なし)'}\n\n【元のユーザープロンプト】\n${userPrompt}\n\n【評価対象の出力】\n${output}` },
   ];
-  const res = await chatCompletion(baseUrl, apiKey, model, judgeMessages, { temperature: 0, topP: 1, maxTokens: 300 }, signal);
+  const judgeParams = { temperature: 0, topP: 1, maxTokens: 1024 };
+  const extra = { response_format: { type: 'json_object' } };
+  if (REASONING_MODEL_RE.test(model)) extra.reasoning_effort = 'low';
+
+  let res;
+  try {
+    res = await chatCompletion(baseUrl, apiKey, model, judgeMessages, judgeParams, signal, extra);
+  } catch (e) {
+    if (e.name === 'AbortError') throw e;
+    // Some providers reject response_format/reasoning_effort; retry once without them.
+    res = await chatCompletion(baseUrl, apiKey, model, judgeMessages, judgeParams, signal, {});
+  }
+
   const parsed = parseJudgeJson(res.content);
   if (!parsed || typeof parsed.score !== 'number') {
-    return { score: null, reason: null, raw: res.content, error: 'JSON解析に失敗しました' };
+    const reasonHint = !res.content
+      ? '（出力が空でした。max_tokens不足で打ち切られた可能性があります）'
+      : res.finishReason === 'length'
+        ? '（出力がmax_tokens上限で打ち切られた可能性があります）'
+        : '';
+    return { score: null, reason: null, raw: res.content, error: `JSON解析に失敗しました${reasonHint}` };
   }
   return { score: parsed.score, reason: parsed.reason ?? '', raw: res.content };
 }
@@ -780,7 +803,8 @@ function renderRunCard(i) {
   let judgeHtml = '';
   if (r.judge) {
     if (r.judge.error) {
-      judgeHtml = `<div class="judge-box" style="color:var(--danger);">Judgeエラー: ${escapeHtml(r.judge.error)}</div>`;
+      const rawSnippet = r.judge.raw ? `<br><span style="color:var(--text2);font-size:12px;">Judge出力: ${escapeHtml(r.judge.raw.slice(0, 300))}</span>` : '';
+      judgeHtml = `<div class="judge-box" style="color:var(--danger);">Judgeエラー: ${escapeHtml(r.judge.error)}${rawSnippet}</div>`;
     } else if (r.judge.score != null) {
       judgeHtml = `<div class="judge-box"><span class="judge-score">${r.judge.score} / 10</span> — ${escapeHtml(r.judge.reason || '')}</div>`;
     }
