@@ -230,8 +230,8 @@
         </select>
       </div>
       <div class="form-group">
-        <label for="apiKey">API キー</label>
-        <input type="password" id="apiKey" placeholder="gsk_..." autocomplete="off">
+        <label for="apiKey">API キー <span style="color:var(--danger);font-weight:700;" title="必須">*必須</span></label>
+        <input type="password" id="apiKey" placeholder="gsk_..." autocomplete="off" oninput="syncApiKeyGating()">
       </div>
     </div>
     <div class="form-row">
@@ -253,10 +253,11 @@
         </datalist>
       </div>
     </div>
-    <div style="margin-bottom:14px;">
+    <div style="margin-bottom:14px; display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
       <button class="btn btn-ghost" id="fetchModelsBtn" onclick="fetchModels()">モデル一覧を取得</button>
+      <span id="modelFetchStatus" style="font-size:13px;"></span>
     </div>
-    <div class="card-note" id="providerNote">APIキーは console.groq.com で取得。gpt-oss-120bは $0.15 / $0.60 per 1M tok（入力/出力）と低コスト。</div>
+    <div class="card-note" id="providerNote"></div>
     <div class="card-note">
       APIキーはJS変数（メモリ上）にのみ保持し、ページを閉じると消去されます。localStorage等への保存は行いません。
       ブラウザから直接APIへリクエストするため、Origin制限のあるプロバイダでは失敗する場合があります（実行時にCORSエラーの案内を表示します）。
@@ -483,7 +484,7 @@ const PROVIDER_PRESETS = {
     baseUrl: 'https://api.groq.com/openai/v1',
     models: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b', 'llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
     defaultModel: 'openai/gpt-oss-120b',
-    note: 'APIキーは console.groq.com で取得。gpt-oss-120bは $0.15 / $0.60 per 1M tok（入力/出力）と低コスト。',
+    note: 'APIキーは console.groq.com で取得（無料・カード登録不要）。無料枠は全モデル利用可能だが、リクエスト数（分単位・日単位）とトークン数（分単位）の両方に上限があり、モデルごとに異なる（最新値は console.groq.com/docs/rate-limits を参照）。従量課金にするとこの上限が大きく緩和され、gpt-oss-120bは $0.15 / $0.60 per 1M tok（入力/出力）と低コスト。',
   },
   openrouter: {
     baseUrl: 'https://openrouter.ai/api/v1',
@@ -508,10 +509,8 @@ const PROVIDER_PRESETS = {
 function applyProviderPreset() {
   const key = document.getElementById('providerPreset').value;
   const preset = PROVIDER_PRESETS[key];
-  if (key !== 'custom') {
-    document.getElementById('baseUrl').value = preset.baseUrl;
-    document.getElementById('modelInput').value = preset.defaultModel;
-  }
+  document.getElementById('baseUrl').value = preset.baseUrl;
+  document.getElementById('modelInput').value = preset.defaultModel;
   document.getElementById('modelList').innerHTML = preset.models.map(id => `<option value="${escapeHtml(id)}">`).join('');
   document.getElementById('providerNote').textContent = preset.note;
 }
@@ -520,14 +519,22 @@ function applyProviderPreset() {
 
 function normalizeBase(url) { return url.trim().replace(/\/+$/, ''); }
 
+function setModelFetchStatus(msg, kind) {
+  const el = document.getElementById('modelFetchStatus');
+  const color = kind === 'error' ? 'var(--danger)' : kind === 'success' ? 'var(--success)' : 'var(--text2)';
+  el.style.color = color;
+  el.textContent = msg;
+}
+
 async function fetchModels() {
   const baseUrl = normalizeBase(document.getElementById('baseUrl').value);
   const apiKey = document.getElementById('apiKey').value.trim();
-  if (!apiKey) return setMsg('APIキーを入力してください', 'error');
+  if (!apiKey) return setModelFetchStatus('APIキーを入力してください', 'error');
   const btn = document.getElementById('fetchModelsBtn');
   btn.disabled = true;
   const orig = btn.textContent;
   btn.innerHTML = '<span class="spinner"></span> 取得中…';
+  setModelFetchStatus('', 'info');
   try {
     const r = await fetch(`${baseUrl}/models`, { headers: { 'Authorization': `Bearer ${apiKey}` } });
     if (!r.ok) throw new Error(`API ${r.status}: ${r.statusText}`);
@@ -536,9 +543,9 @@ async function fetchModels() {
     if (!ids.length) throw new Error('モデルが見つかりませんでした');
     const dl = document.getElementById('modelList');
     dl.innerHTML = ids.map(id => `<option value="${escapeHtml(id)}">`).join('');
-    setMsg(`${ids.length} 件のモデルを取得しました`, 'success');
+    setModelFetchStatus(`${ids.length} 件のモデルを取得しました`, 'success');
   } catch (e) {
-    setMsg(`モデル取得エラー: ${describeError(e)}`, 'error');
+    setModelFetchStatus(`モデル取得エラー: ${describeError(e)}`, 'error');
   } finally {
     btn.disabled = false;
     btn.textContent = orig;
@@ -765,9 +772,20 @@ async function runBench() {
     renderSummary(n, judgeEnabled, embEnabled);
     document.getElementById('results').classList.remove('hidden');
   } finally {
-    document.getElementById('runBtn').disabled = false;
+    syncApiKeyGating();
     document.getElementById('stopBtn').classList.add('hidden');
   }
+}
+
+function syncApiKeyGating() {
+  const hasKey = document.getElementById('apiKey').value.trim().length > 0;
+  const hint = hasKey ? '' : 'APIキーを入力してください';
+  const fetchBtn = document.getElementById('fetchModelsBtn');
+  const runBtn = document.getElementById('runBtn');
+  fetchBtn.disabled = !hasKey;
+  fetchBtn.title = hint;
+  runBtn.disabled = !hasKey;
+  runBtn.title = hint;
 }
 
 // ─── Rendering ──────────────────────────────────────────────────────────────
@@ -1071,6 +1089,11 @@ function exportJSON() {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+// ─── Init ───────────────────────────────────────────────────────────────────
+
+applyProviderPreset();
+syncApiKeyGating();
 </script>
 </body>
 </html>
