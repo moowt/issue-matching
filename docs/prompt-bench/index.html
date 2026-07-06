@@ -223,8 +223,8 @@
           <span class="info-icon">ⓘ<span class="tooltip">「OpenAI互換API」はリクエスト形式が同じという意味で、APIキーはプロバイダ間で共通ではありません。プリセットを選ぶとBase URLと候補モデルが自動設定されます。APIキーは各プロバイダのサイトで個別に発行してください。</span></span>
         </label>
         <select id="providerPreset" onchange="applyProviderPreset()">
-          <option value="groq" selected>Groq（推奨・低コスト）</option>
-          <option value="openrouter">OpenRouter（gpt-oss-120b無料枠あり）</option>
+          <option value="groq">Groq（低コスト）</option>
+          <option value="openrouter" selected>OpenRouter（推奨）</option>
           <option value="together">Together AI</option>
           <option value="custom">カスタム（手動入力）</option>
         </select>
@@ -237,7 +237,7 @@
     <div class="form-row">
       <div class="form-group">
         <label for="baseUrl">Base URL</label>
-        <input type="url" id="baseUrl" value="https://api.groq.com/openai/v1">
+        <input type="url" id="baseUrl" value="https://openrouter.ai/api/v1">
       </div>
       <div class="form-group">
         <label for="modelInput">
@@ -589,9 +589,9 @@ const PROVIDER_PRESETS = {
   },
   openrouter: {
     baseUrl: 'https://openrouter.ai/api/v1',
-    models: ['openai/gpt-oss-120b:free', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b:free', 'openai/gpt-oss-20b'],
-    defaultModel: 'openai/gpt-oss-120b:free',
-    note: 'APIキーは openrouter.ai で取得。":free" サフィックスは無料枠（強いレート制限あり）。安定した繰り返し実行が必要な場合は ":free" なしの有料版を推奨。',
+    models: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
+    defaultModel: 'openai/gpt-oss-120b',
+    note: 'APIキーは openrouter.ai で取得。":free" サフィックスの無料枠モデルは提供停止・強いレート制限などで実用にならないことが多いため、既定では従量課金のモデルIDのみを候補にしています。',
   },
   together: {
     baseUrl: 'https://api.together.xyz/v1',
