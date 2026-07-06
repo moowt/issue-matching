@@ -223,8 +223,8 @@
           <span class="info-icon">ⓘ<span class="tooltip">「OpenAI互換API」はリクエスト形式が同じという意味で、APIキーはプロバイダ間で共通ではありません。プリセットを選ぶとBase URLと候補モデルが自動設定されます。APIキーは各プロバイダのサイトで個別に発行してください。</span></span>
         </label>
         <select id="providerPreset" onchange="applyProviderPreset()">
-          <option value="groq" selected>Groq（推奨・低コスト）</option>
-          <option value="openrouter">OpenRouter（gpt-oss-120b無料枠あり）</option>
+          <option value="groq">Groq（低コスト）</option>
+          <option value="openrouter" selected>OpenRouter（推奨）</option>
           <option value="together">Together AI</option>
           <option value="custom">カスタム（手動入力）</option>
         </select>
@@ -237,7 +237,7 @@
     <div class="form-row">
       <div class="form-group">
         <label for="baseUrl">Base URL</label>
-        <input type="url" id="baseUrl" value="https://api.groq.com/openai/v1">
+        <input type="url" id="baseUrl" value="https://openrouter.ai/api/v1">
       </div>
       <div class="form-group">
         <label for="modelInput">
@@ -556,7 +556,17 @@ function toggleJsonSchemaFields() {
   document.getElementById('jsonSchemaFields').classList.toggle('hidden', !isSchema);
 }
 
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function sleep(ms, signal) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(resolve, ms);
+    if (!signal) return;
+    if (signal.aborted) { clearTimeout(t); reject(Object.assign(new Error('Aborted'), { name: 'AbortError' })); return; }
+    signal.addEventListener('abort', () => {
+      clearTimeout(t);
+      reject(Object.assign(new Error('Aborted'), { name: 'AbortError' }));
+    }, { once: true });
+  });
+}
 
 function cosSim(a, b) {
   let dot = 0, na = 0, nb = 0;
@@ -579,9 +589,9 @@ const PROVIDER_PRESETS = {
   },
   openrouter: {
     baseUrl: 'https://openrouter.ai/api/v1',
-    models: ['openai/gpt-oss-120b:free', 'openai/gpt-oss-120b', 'openai/gpt-oss-20b:free', 'openai/gpt-oss-20b'],
-    defaultModel: 'openai/gpt-oss-120b:free',
-    note: 'APIキーは openrouter.ai で取得。":free" サフィックスは無料枠（強いレート制限あり）。安定した繰り返し実行が必要な場合は ":free" なしの有料版を推奨。',
+    models: ['openai/gpt-oss-120b', 'openai/gpt-oss-20b'],
+    defaultModel: 'openai/gpt-oss-120b',
+    note: 'APIキーは openrouter.ai で取得。":free" サフィックスの無料枠モデルは提供停止・強いレート制限などで実用にならないことが多いため、既定では従量課金のモデルIDのみを候補にしています。',
   },
   together: {
     baseUrl: 'https://api.together.xyz/v1',
@@ -650,8 +660,12 @@ function describeError(e) {
   return e.message || String(e);
 }
 
-async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, extra = {}) {
-  const maxRetries = 5;
+async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, extra = {}, onRetry) {
+  // 429 (rate limit) is retried until it succeeds, the caller aborts (Stop
+  // button), or the safety ceiling below is hit — a low fixed retry count
+  // gives up long before a tight per-minute token budget actually resets.
+  const maxRetries = 100;
+  const maxFallbackWaitMs = 60000;
   let attempt = 0;
   while (true) {
     const start = performance.now();
@@ -669,9 +683,10 @@ async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, 
     }
     if (r.status === 429 && attempt < maxRetries) {
       const retryAfter = parseFloat(r.headers.get('retry-after'));
-      const waitMs = !isNaN(retryAfter) ? retryAfter * 1000 : 2000 * Math.pow(2, attempt);
+      const waitMs = !isNaN(retryAfter) ? retryAfter * 1000 : Math.min(2000 * Math.pow(2, attempt), maxFallbackWaitMs);
       attempt++;
-      await sleep(waitMs);
+      if (onRetry) onRetry(waitMs, attempt);
+      await sleep(waitMs, signal);
       continue;
     }
     const latencyMs = performance.now() - start;
@@ -680,11 +695,16 @@ async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, 
       throw new Error(`API ${r.status}: ${e.error?.message || r.statusText}`);
     }
     const data = await r.json();
+    const remainingTokens = parseInt(r.headers.get('x-ratelimit-remaining-tokens'), 10);
     return {
       content: data.choices?.[0]?.message?.content ?? '',
       finishReason: data.choices?.[0]?.finish_reason ?? null,
       usage: data.usage ?? null,
       latencyMs,
+      rateLimit: !isNaN(remainingTokens) ? {
+        remainingTokens,
+        resetTokens: r.headers.get('x-ratelimit-reset-tokens'),
+      } : null,
     };
   }
 }
@@ -996,11 +1016,13 @@ async function runBench() {
       const controller = new AbortController();
       activeControllers.add(controller);
       try {
-        const res = await chatCompletion(baseUrl, apiKey, model, messages, params, controller.signal, executionExtra);
+        const res = await chatCompletion(baseUrl, apiKey, model, messages, params, controller.signal, executionExtra,
+          (waitMs, attempt) => updateProgress(`実行 ${i+1}/${n}: レート制限中… ${Math.ceil(waitMs/1000)}秒後に再試行（${attempt}回目、「停止」でキャンセル可）`));
         runs[i].output = res.content;
         runs[i].finishReason = res.finishReason;
         runs[i].latencyMs = res.latencyMs;
         runs[i].usage = res.usage;
+        runs[i].rateLimit = res.rateLimit;
         if (jsonCheckEnabled) runs[i].jsonCheck = validateJsonStrict(res.content);
       } catch (e) {
         if (e.name === 'AbortError') { runs[i].error = '停止されました'; }
@@ -1113,6 +1135,7 @@ function renderRunCard(i) {
     `<span class="run-meta-chip">${r.latencyMs != null ? Math.round(r.latencyMs) + ' ms' : '-'}</span>`,
     `<span class="run-meta-chip">prompt:${u.prompt_tokens ?? '-'} / completion:${u.completion_tokens ?? '-'} / total:${u.total_tokens ?? '-'}</span>`,
     r.finishReason ? `<span class="run-meta-chip">finish:${escapeHtml(r.finishReason)}</span>` : '',
+    r.rateLimit ? `<span class="run-meta-chip" title="1分あたりのトークン残数（プロバイダ申告値）">残TPM:${r.rateLimit.remainingTokens}</span>` : '',
     jsonCheckChipHtml(r.jsonCheck),
   ].join('');
 
