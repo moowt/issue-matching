@@ -65,6 +65,7 @@
       font-size: 15px; font-family: inherit; outline: none; transition: border-color .2s;
     }
     input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+    input:disabled { opacity: .4; cursor: not-allowed; }
     select { cursor: pointer; }
     textarea { font-family: 'Monaco','Menlo','Consolas',monospace; font-size: 13px; line-height: 1.5; resize: vertical; }
 
@@ -280,31 +281,50 @@
     <div class="card-title">パラメータ</div>
     <div class="form-row3">
       <div class="form-group">
-        <label for="temperature">temperature</label>
-        <input type="number" id="temperature" value="1" min="0" max="2" step="0.05">
-      </div>
-      <div class="form-group">
-        <label for="topP">top_p</label>
-        <input type="number" id="topP" value="1" min="0" max="1" step="0.05">
-      </div>
-      <div class="form-group">
-        <label for="maxTokens">max_tokens</label>
-        <input type="number" id="maxTokens" value="1024" min="1" max="32768" step="1">
+        <label for="temperature">
+          temperature
+          <span class="info-icon">ⓘ<span class="tooltip">出力のランダム性を制御します。0に近いほど決定論的（同一入力に対して同一出力になりやすい）、大きいほど多様な出力になります。既定値0は再現性検証向けの設定です。値を変えて実行し、ばらつきの変化を比較する用途で最もよく調整するパラメータです。</span></span>
+        </label>
+        <input type="number" id="temperature" value="0" min="0" max="2" step="0.05">
       </div>
       <div class="form-group">
         <label for="repeatN">
           繰り返し回数
-          <span class="info-icon">ⓘ<span class="tooltip">同一条件でchat completionsをN回呼び出します。1〜30回。</span></span>
+          <span class="info-icon">ⓘ<span class="tooltip">同一条件でchat completionsをN回呼び出します。1〜30回。回数を増やすほど分布・ばらつきの評価は安定しますが、実行時間とコストが増えます。</span></span>
         </label>
         <input type="number" id="repeatN" value="5" min="1" max="30" step="1">
       </div>
+      <div class="form-group">
+        <label for="concurrency">
+          同時実行数
+          <span class="info-icon">ⓘ<span class="tooltip">API側の制限ではなく本ツール側の上限です（暴走防止のため1〜10）。429エラー時は自動でリトライ・待機しますが、無料枠やレート制限が厳しいプロバイダでは1〜3程度を推奨します。</span></span>
+        </label>
+        <input type="number" id="concurrency" value="1" min="1" max="10" step="1">
+      </div>
     </div>
-    <div class="form-group" style="max-width:240px;">
-      <label for="concurrency">
-        同時実行数
-        <span class="info-icon">ⓘ<span class="tooltip">API側の制限ではなく本ツール側の上限です（暴走防止のため1〜10）。429エラー時は自動でリトライ・待機しますが、無料枠やレート制限が厳しいプロバイダでは1〜3程度を推奨します。</span></span>
+
+    <button type="button" class="btn btn-ghost" id="advParamsBtn" onclick="toggleAdvancedParams()">+ 詳細パラメータ（top_p / max_tokens）</button>
+    <div class="option-body" id="advParamsBody">
+      <label class="option-row">
+        <input type="checkbox" id="topPEnabled" onchange="toggleParamInput('topP')">
+        <span>
+          top_p を指定する
+          <span class="info-icon">ⓘ<span class="tooltip">nucleus sampling時の累積確率閾値。通常はモデル/プロバイダの既定値のままで問題なく、明示的に狭める意図があるときだけ指定します。チェックを外すとリクエストに含めず既定値に委ねます。</span></span>
+        </span>
       </label>
-      <input type="number" id="concurrency" value="1" min="1" max="10" step="1">
+      <div class="form-group" style="max-width:200px;margin:8px 0 16px;">
+        <input type="number" id="topP" value="1" min="0" max="1" step="0.05" disabled>
+      </div>
+      <label class="option-row">
+        <input type="checkbox" id="maxTokensEnabled" onchange="toggleParamInput('maxTokens')">
+        <span>
+          max_tokens を指定する
+          <span class="info-icon">ⓘ<span class="tooltip">生成する出力の最大トークン数。チェックを外すとリクエストに含めず、モデル/プロバイダ側の既定上限（多くの場合コンテキスト長近くまで）に委ねます。出力を意図的に打ち切りたい場合のみ指定してください。</span></span>
+        </span>
+      </label>
+      <div class="form-group" style="max-width:200px;margin-top:8px;">
+        <input type="number" id="maxTokens" value="4096" min="1" max="32768" step="1" disabled>
+      </div>
     </div>
   </div>
 
@@ -428,6 +448,17 @@ function escapeHtml(s) {
 function toggleOption(name) {
   const enabled = document.getElementById(name + 'Enabled').checked;
   document.getElementById(name + 'Body').classList.toggle('open', enabled);
+}
+
+function toggleAdvancedParams() {
+  const body = document.getElementById('advParamsBody');
+  const open = body.classList.toggle('open');
+  document.getElementById('advParamsBtn').textContent = (open ? '− ' : '+ ') + '詳細パラメータ（top_p / max_tokens）';
+}
+
+function toggleParamInput(name) {
+  const enabled = document.getElementById(name + 'Enabled').checked;
+  document.getElementById(name).disabled = !enabled;
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -620,8 +651,8 @@ async function runBench() {
   const userPrompt = document.getElementById('userPrompt').value.trim();
   const params = {
     temperature: parseFloat(document.getElementById('temperature').value),
-    topP: parseFloat(document.getElementById('topP').value),
-    maxTokens: parseInt(document.getElementById('maxTokens').value, 10),
+    topP: document.getElementById('topPEnabled').checked ? parseFloat(document.getElementById('topP').value) : undefined,
+    maxTokens: document.getElementById('maxTokensEnabled').checked ? parseInt(document.getElementById('maxTokens').value, 10) : undefined,
   };
   const n = Math.max(1, Math.min(30, parseInt(document.getElementById('repeatN').value, 10) || 1));
   const concurrency = Math.max(1, Math.min(10, parseInt(document.getElementById('concurrency').value, 10) || 1));
@@ -908,8 +939,8 @@ function exportJSON() {
       systemPrompt: document.getElementById('systemPrompt').value,
       userPrompt: document.getElementById('userPrompt').value,
       temperature: parseFloat(document.getElementById('temperature').value),
-      topP: parseFloat(document.getElementById('topP').value),
-      maxTokens: parseInt(document.getElementById('maxTokens').value, 10),
+      topP: document.getElementById('topPEnabled').checked ? parseFloat(document.getElementById('topP').value) : null,
+      maxTokens: document.getElementById('maxTokensEnabled').checked ? parseInt(document.getElementById('maxTokens').value, 10) : null,
       repeatN: parseInt(document.getElementById('repeatN').value, 10),
       concurrency: parseInt(document.getElementById('concurrency').value, 10),
       judgeEnabled: document.getElementById('judgeEnabled').checked,
