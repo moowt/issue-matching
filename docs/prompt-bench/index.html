@@ -230,8 +230,8 @@
         </select>
       </div>
       <div class="form-group">
-        <label for="apiKey">API キー</label>
-        <input type="password" id="apiKey" placeholder="gsk_..." autocomplete="off">
+        <label for="apiKey">API キー <span style="color:var(--danger);font-weight:700;" title="必須">*必須</span></label>
+        <input type="password" id="apiKey" placeholder="gsk_..." autocomplete="off" oninput="syncApiKeyGating()">
       </div>
     </div>
     <div class="form-row">
@@ -774,9 +774,20 @@ async function runBench() {
     renderSummary(n, judgeEnabled, embEnabled);
     document.getElementById('results').classList.remove('hidden');
   } finally {
-    document.getElementById('runBtn').disabled = false;
+    syncApiKeyGating();
     document.getElementById('stopBtn').classList.add('hidden');
   }
+}
+
+function syncApiKeyGating() {
+  const hasKey = document.getElementById('apiKey').value.trim().length > 0;
+  const hint = hasKey ? '' : 'APIキーを入力してください';
+  const fetchBtn = document.getElementById('fetchModelsBtn');
+  const runBtn = document.getElementById('runBtn');
+  fetchBtn.disabled = !hasKey;
+  fetchBtn.title = hint;
+  runBtn.disabled = !hasKey;
+  runBtn.title = hint;
 }
 
 // ─── Rendering ──────────────────────────────────────────────────────────────
@@ -1080,6 +1091,10 @@ function exportJSON() {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+// ─── Init ───────────────────────────────────────────────────────────────────
+
+syncApiKeyGating();
 </script>
 </body>
 </html>
