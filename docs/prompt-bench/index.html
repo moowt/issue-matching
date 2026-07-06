@@ -304,7 +304,7 @@
       </div>
     </div>
 
-    <button type="button" class="btn btn-ghost" id="advParamsBtn" onclick="toggleAdvancedParams()">+ 詳細パラメータ（top_p / max_tokens / Structured Output）</button>
+    <button type="button" class="btn btn-ghost" id="advParamsBtn" onclick="toggleAdvancedParams()">+ 詳細パラメータ（top_p / max_tokens / reasoning_effort / Structured Output）</button>
     <div class="option-body" id="advParamsBody">
       <label class="option-row">
         <input type="checkbox" id="topPEnabled" onchange="toggleParamInput('topP')">
@@ -325,6 +325,21 @@
       </label>
       <div class="form-group" style="max-width:200px;margin-top:8px;">
         <input type="number" id="maxTokens" value="4096" min="1" max="32768" step="1" disabled>
+      </div>
+
+      <label class="option-row">
+        <input type="checkbox" id="reasoningEffortEnabled" onchange="toggleParamInput('reasoningEffort')">
+        <span>
+          reasoning_effort を指定する
+          <span class="info-icon">ⓘ<span class="tooltip">推論(reasoning)モデル（openai/gpt-oss系など）の思考量を指定します。lowにすると思考トークンが減り速度・コストが向上、highにすると精度が上がる傾向があります（既定はモデルによりmedium等）。推論モデルでない場合は無視される、またはエラーになることがあります。</span></span>
+        </span>
+      </label>
+      <div class="form-group" style="max-width:200px;margin:8px 0 16px;">
+        <select id="reasoningEffort" disabled>
+          <option value="low">low</option>
+          <option value="medium" selected>medium</option>
+          <option value="high">high</option>
+        </select>
       </div>
 
       <label class="option-row">
@@ -462,7 +477,7 @@ strictモードでは全プロパティをrequiredに含め、additionalProperti
 
   <!-- Results -->
   <div id="results" class="hidden">
-    <div class="card">
+    <div class="card hidden" id="summaryCard">
       <div class="card-title">サマリー</div>
       <div class="stats-grid" id="summaryStats"></div>
       <div class="two-col" id="chartsRow">
@@ -538,7 +553,7 @@ function toggleOption(name) {
 function toggleAdvancedParams() {
   const body = document.getElementById('advParamsBody');
   const open = body.classList.toggle('open');
-  document.getElementById('advParamsBtn').textContent = (open ? '− ' : '+ ') + '詳細パラメータ（top_p / max_tokens / Structured Output）';
+  document.getElementById('advParamsBtn').textContent = (open ? '− ' : '+ ') + '詳細パラメータ（top_p / max_tokens / reasoning_effort / Structured Output）';
 }
 
 function toggleParamInput(name) {
@@ -965,6 +980,9 @@ async function runBench() {
 
   const jsonCheckEnabled = document.getElementById('jsonCheckEnabled').checked;
 
+  const reasoningEffortEnabled = document.getElementById('reasoningEffortEnabled').checked;
+  const reasoningEffort = document.getElementById('reasoningEffort').value;
+
   const structuredOutputEnabled = document.getElementById('structuredOutputEnabled').checked;
   const structuredOutputMode = document.getElementById('structuredOutputMode').value;
   const jsonSchemaName = document.getElementById('jsonSchemaName').value.trim() || 'output';
@@ -980,15 +998,16 @@ async function runBench() {
   let executionExtra = {};
   if (structuredOutputEnabled) {
     if (structuredOutputMode === 'json_object') {
-      executionExtra = { response_format: { type: 'json_object' } };
+      executionExtra.response_format = { type: 'json_object' };
     } else {
       if (!jsonSchemaText) return setMsg('Structured OutputでJSON Schemaモードを使う場合はスキーマを入力してください', 'error');
       let schemaObj;
       try { schemaObj = JSON.parse(jsonSchemaText); }
       catch (e) { return setMsg(`JSON Schemaの構文が不正です: ${e.message}`, 'error'); }
-      executionExtra = { response_format: { type: 'json_schema', json_schema: { name: jsonSchemaName, strict: jsonSchemaStrict, schema: schemaObj } } };
+      executionExtra.response_format = { type: 'json_schema', json_schema: { name: jsonSchemaName, strict: jsonSchemaStrict, schema: schemaObj } };
     }
   }
+  if (reasoningEffortEnabled) executionExtra.reasoning_effort = reasoningEffort;
 
   stopRequested = false;
   activeControllers = new Set();
@@ -1000,8 +1019,9 @@ async function runBench() {
   document.getElementById('runBtn').disabled = true;
   document.getElementById('stopBtn').classList.remove('hidden');
   document.getElementById('progWrap').classList.remove('hidden');
-  document.getElementById('results').classList.add('hidden');
+  document.getElementById('summaryCard').classList.add('hidden');
   renderRunListSkeleton(n);
+  document.getElementById('results').classList.remove('hidden');
 
   const messages = [];
   if (systemPrompt.trim()) messages.push({ role: 'system', content: systemPrompt });
@@ -1075,7 +1095,7 @@ async function runBench() {
     setProgress(100, stopRequested ? '停止しました' : '完了');
     renderSummary(n, judgeEnabled, embEnabled, jsonCheckEnabled);
     renderTrendCard(trendEnabled);
-    document.getElementById('results').classList.remove('hidden');
+    document.getElementById('summaryCard').classList.remove('hidden');
   } finally {
     syncApiKeyGating();
     document.getElementById('stopBtn').classList.add('hidden');
@@ -1320,6 +1340,7 @@ function generateMarkdownReport() {
   const temperature = document.getElementById('temperature').value;
   const topP = document.getElementById('topPEnabled').checked ? document.getElementById('topP').value : '(未指定・既定値)';
   const maxTokens = document.getElementById('maxTokensEnabled').checked ? document.getElementById('maxTokens').value : '(未指定・既定値)';
+  const reasoningEffort = document.getElementById('reasoningEffortEnabled').checked ? document.getElementById('reasoningEffort').value : '(未指定・既定値)';
   const judgeEnabled = document.getElementById('judgeEnabled').checked;
   const embEnabled = document.getElementById('embEnabled').checked;
   const jsonCheckEnabled = document.getElementById('jsonCheckEnabled').checked;
@@ -1343,6 +1364,7 @@ function generateMarkdownReport() {
   lines.push(`| temperature | ${temperature} |`);
   lines.push(`| top_p | ${topP} |`);
   lines.push(`| max_tokens | ${maxTokens} |`);
+  lines.push(`| reasoning_effort | ${reasoningEffort} |`);
   lines.push(`| 繰り返し回数 | ${runs.length} |`);
   if (structuredOutputEnabled) lines.push(`| Structured Output | ${structuredOutputMode} |`);
   lines.push('');
@@ -1430,6 +1452,7 @@ function exportJSON() {
       temperature: parseFloat(document.getElementById('temperature').value),
       topP: document.getElementById('topPEnabled').checked ? parseFloat(document.getElementById('topP').value) : null,
       maxTokens: document.getElementById('maxTokensEnabled').checked ? parseInt(document.getElementById('maxTokens').value, 10) : null,
+      reasoningEffort: document.getElementById('reasoningEffortEnabled').checked ? document.getElementById('reasoningEffort').value : null,
       repeatN: parseInt(document.getElementById('repeatN').value, 10),
       concurrency: parseInt(document.getElementById('concurrency').value, 10),
       judgeEnabled: document.getElementById('judgeEnabled').checked,
