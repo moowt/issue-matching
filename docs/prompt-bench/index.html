@@ -1052,18 +1052,27 @@ async function runBench() {
       completed++;
       updateProgress(`実行 ${Math.min(completed, n)}/${n} 完了`);
       renderRunCard(i);
+    }, concurrency);
 
-      if (!stopRequested && judgeEnabled && runs[i].output != null) {
+    if (judgeEnabled && !stopRequested) {
+      let judged = 0;
+      const toJudge = runs.filter(r => r.output != null).length;
+      await runPool(n, async (i) => {
+        if (stopRequested || runs[i].output == null) return;
+        const controller = new AbortController();
+        activeControllers.add(controller);
         try {
           runs[i].judge = await judgeRun(baseUrl, apiKey, judgeModel, rubric, systemPrompt, userPrompt, runs[i].output, controller.signal);
         } catch (e) {
           runs[i].judge = { score: null, reason: null, error: describeError(e) };
         }
+        activeControllers.delete(controller);
+        judged++;
         completed++;
-        updateProgress(`採点中… ${i+1}件目`);
+        updateProgress(`採点中… ${judged}/${toJudge}件目`);
         renderRunCard(i);
-      }
-    }, concurrency);
+      }, concurrency);
+    }
 
     if (embEnabled && !stopRequested) {
       const successfulRuns = runs.filter(r => r.output != null);
