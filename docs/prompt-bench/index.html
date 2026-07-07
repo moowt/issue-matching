@@ -1213,9 +1213,11 @@ function renderRunCard(i) {
   }
 
   const u = r.usage || {};
+  const cachedTokens = u.prompt_tokens_details?.cached_tokens;
   const chips = [
     `<span class="run-meta-chip">${r.latencyMs != null ? Math.round(r.latencyMs) + ' ms' : '-'}</span>`,
     `<span class="run-meta-chip">prompt:${u.prompt_tokens ?? '-'} / completion:${u.completion_tokens ?? '-'} / total:${u.total_tokens ?? '-'}</span>`,
+    cachedTokens ? `<span class="run-meta-chip" style="color:var(--success);" title="プロンプトキャッシュがヒットしたトークン数（プロバイダ申告値）">キャッシュ:${cachedTokens}</span>` : '',
     r.finishReason ? `<span class="run-meta-chip">finish:${escapeHtml(r.finishReason)}</span>` : '',
     r.rateLimit ? `<span class="run-meta-chip" title="1分あたりのトークン残数（プロバイダ申告値）">残TPM:${r.rateLimit.remainingTokens}</span>` : '',
     jsonCheckChipHtml(r.jsonCheck),
@@ -1462,6 +1464,7 @@ function generateMarkdownReport() {
     const u = r.usage || {};
     lines.push(`- レイテンシ: ${r.latencyMs != null ? Math.round(r.latencyMs) + ' ms' : '-'}`);
     lines.push(`- トークン数: prompt ${u.prompt_tokens ?? '-'} / completion ${u.completion_tokens ?? '-'} / total ${u.total_tokens ?? '-'}`);
+    if (u.prompt_tokens_details?.cached_tokens) lines.push(`- キャッシュヒット: ${u.prompt_tokens_details.cached_tokens} tokens`);
     if (r.finishReason) lines.push(`- finish_reason: ${r.finishReason}`);
     if (r.judge) {
       if (r.judge.error) lines.push(`- Judge: エラー（${r.judge.error}）`);
