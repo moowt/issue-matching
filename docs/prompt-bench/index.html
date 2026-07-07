@@ -1091,11 +1091,24 @@ async function runBench() {
   if (systemPrompt.trim()) messages.push({ role: 'system', content: systemPrompt });
   messages.push({ role: 'user', content: userPrompt });
 
-  let completed = 0;
-  const totalSteps = n * (1 + (judgeEnabled ? 1 : 0));
-  const updateProgress = (label) => setProgress(Math.min(99, (completed/totalSteps)*100), label);
+  // Each stage (本体の実行 / Judge採点 / Embedding計算 / 傾向分析) gets its own
+  // labeled slice of the bar instead of being blended into one ambiguous
+  // percentage, so it's always clear which stage is running.
+  const phases = ['main'];
+  if (judgeEnabled) phases.push('judge');
+  if (embEnabled) phases.push('embedding');
+  if (trendEnabled) phases.push('trend');
+  const phaseLabel = { main: '本体の実行', judge: 'LLM-as-Judge採点', embedding: 'Embedding計算', trend: '傾向分析' };
+  const phaseStatus = (phaseKey, done, total, suffixOverride) => {
+    const idx = phases.indexOf(phaseKey);
+    const frac = total > 0 ? done / total : 0;
+    const pct = Math.min(99, ((idx + frac) / phases.length) * 100);
+    const suffix = suffixOverride ?? (total ? `${done}/${total}件` : '');
+    setProgress(pct, `[${idx + 1}/${phases.length}] ${phaseLabel[phaseKey]}${suffix ? ': ' + suffix : ''}`);
+  };
 
   try {
+    let mainCompleted = 0;
     await runPool(n, async (i) => {
       const controller = new AbortController();
       activeControllers.add(controller);
@@ -1107,7 +1120,7 @@ async function runBench() {
           if (now - lastRenderAt > 150) { lastRenderAt = now; renderRunCard(i); }
         } : undefined;
         const res = await chatCompletion(baseUrl, apiKey, model, messages, params, controller.signal, executionExtra,
-          (waitMs, attempt) => updateProgress(`実行 ${i+1}/${n}: レート制限中… ${Math.ceil(waitMs/1000)}秒後に再試行（${attempt}回目、「停止」でキャンセル可）`),
+          (waitMs, attempt) => phaseStatus('main', mainCompleted, n, `実行${i+1}/${n}: レート制限中… ${Math.ceil(waitMs/1000)}秒後に再試行（${attempt}回目、「停止」でキャンセル可）`),
           onChunk);
         runs[i].output = res.content;
         runs[i].finishReason = res.finishReason;
@@ -1121,8 +1134,8 @@ async function runBench() {
         else { runs[i].error = describeError(e); }
       }
       activeControllers.delete(controller);
-      completed++;
-      updateProgress(`実行 ${Math.min(completed, n)}/${n} 完了`);
+      mainCompleted++;
+      phaseStatus('main', mainCompleted, n);
       renderRunCard(i);
     }, concurrency);
 
@@ -1140,8 +1153,7 @@ async function runBench() {
         }
         activeControllers.delete(controller);
         judged++;
-        completed++;
-        updateProgress(`採点中… ${judged}/${toJudge}件目`);
+        phaseStatus('judge', judged, toJudge);
         renderRunCard(i);
       }, concurrency);
     }
@@ -1149,10 +1161,11 @@ async function runBench() {
     if (embEnabled && !stopRequested) {
       const successfulRuns = runs.filter(r => r.output != null);
       if (successfulRuns.length >= 2) {
-        setProgress(99, 'Embedding計算中…');
+        phaseStatus('embedding', 0, 1, '計算中…');
         try {
           const vecs = await embedTexts(embBaseUrl, embApiKey, embModel, successfulRuns.map(r => r.output));
           successfulRuns.forEach((r, k) => { r.embVec = vecs[k]; });
+          phaseStatus('embedding', 1, 1);
         } catch (e) {
           setMsg(`Embedding計算エラー: ${describeError(e)}`, 'error');
         }
@@ -1162,9 +1175,10 @@ async function runBench() {
     if (trendEnabled && !stopRequested) {
       const successfulOutputs = runs.filter(r => r.output != null).map(r => r.output);
       if (successfulOutputs.length >= 2) {
-        setProgress(99, '傾向分析中…');
+        phaseStatus('trend', 0, 1, '分析中…');
         try {
           trendResult = await analyzeTrend(baseUrl, apiKey, trendModel, systemPrompt, userPrompt, successfulOutputs);
+          phaseStatus('trend', 1, 1);
         } catch (e) {
           trendResult = { text: null, error: describeError(e) };
         }
