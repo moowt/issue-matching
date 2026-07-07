@@ -519,7 +519,16 @@ strictモードでは全プロパティをrequiredに含め、additionalProperti
 
     <div class="card">
       <div class="card-title" style="justify-content:space-between;">
-        <span>各実行の結果</span>
+        <span>
+          各実行の結果
+          <span class="info-icon">ⓘ<span class="tooltip" style="width:300px;">各実行のバッジの意味:<br>
+・<strong>ms（先頭）</strong>: リクエスト開始から完了までの合計時間<br>
+・<strong>初回</strong>: ストリーミング有効時のみ。最初のトークンが届くまでの時間（レスポンス生成が始まった目安）<br>
+・<strong>prompt / completion / total</strong>: 入力（システム+ユーザープロンプト）のトークン数 / モデルが生成した出力のトークン数 / その合計<br>
+・<strong>キャッシュ</strong>: プロンプトキャッシュがヒットしたトークン数（対応プロバイダのみ）<br>
+・<strong>finish</strong>: 生成が止まった理由。stop=正常終了、length=max_tokens上限で打ち切り<br>
+・<strong>残TPM</strong>: プロバイダ申告の1分あたりトークン残数（対応プロバイダのみ）</span></span>
+        </span>
         <span style="display:flex; gap:8px;">
           <button class="btn btn-ghost" id="copyReportBtn" onclick="copyReport()" style="font-size:12px;padding:5px 14px;">結果をコピー</button>
           <button class="btn btn-ghost" onclick="exportJSON()" style="font-size:12px;padding:5px 14px;">JSONエクスポート</button>
@@ -745,6 +754,7 @@ async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, 
     let content = '';
     let finishReason = null;
     let usage = null;
+    let firstTokenAt = null;
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
@@ -759,12 +769,20 @@ async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, 
         let chunk;
         try { chunk = JSON.parse(payload); } catch { continue; }
         const delta = chunk.choices?.[0]?.delta?.content;
-        if (delta) { content += delta; onChunk(content); }
+        if (delta) {
+          if (firstTokenAt === null) firstTokenAt = performance.now();
+          content += delta;
+          onChunk(content);
+        }
         if (chunk.choices?.[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason;
         if (chunk.usage) usage = chunk.usage;
       }
     }
-    return { content, finishReason, usage, latencyMs: performance.now() - start, rateLimit };
+    return {
+      content, finishReason, usage, rateLimit,
+      latencyMs: performance.now() - start,
+      firstTokenLatencyMs: firstTokenAt !== null ? firstTokenAt - start : null,
+    };
   }
 }
 
@@ -1096,6 +1114,7 @@ async function runBench() {
         runs[i].latencyMs = res.latencyMs;
         runs[i].usage = res.usage;
         runs[i].rateLimit = res.rateLimit;
+        runs[i].firstTokenLatencyMs = res.firstTokenLatencyMs;
         if (jsonCheckEnabled) runs[i].jsonCheck = validateJsonStrict(res.content);
       } catch (e) {
         if (e.name === 'AbortError') { runs[i].error = '停止されました'; }
@@ -1213,9 +1232,12 @@ function renderRunCard(i) {
   }
 
   const u = r.usage || {};
+  const cachedTokens = u.prompt_tokens_details?.cached_tokens;
   const chips = [
     `<span class="run-meta-chip">${r.latencyMs != null ? Math.round(r.latencyMs) + ' ms' : '-'}</span>`,
+    r.firstTokenLatencyMs != null ? `<span class="run-meta-chip" title="ストリーミングで最初のトークンが届くまでの時間">初回:${Math.round(r.firstTokenLatencyMs)}ms</span>` : '',
     `<span class="run-meta-chip">prompt:${u.prompt_tokens ?? '-'} / completion:${u.completion_tokens ?? '-'} / total:${u.total_tokens ?? '-'}</span>`,
+    cachedTokens ? `<span class="run-meta-chip" style="color:var(--success);" title="プロンプトキャッシュがヒットしたトークン数（プロバイダ申告値）">キャッシュ:${cachedTokens}</span>` : '',
     r.finishReason ? `<span class="run-meta-chip">finish:${escapeHtml(r.finishReason)}</span>` : '',
     r.rateLimit ? `<span class="run-meta-chip" title="1分あたりのトークン残数（プロバイダ申告値）">残TPM:${r.rateLimit.remainingTokens}</span>` : '',
     jsonCheckChipHtml(r.jsonCheck),
@@ -1461,7 +1483,9 @@ function generateMarkdownReport() {
     }
     const u = r.usage || {};
     lines.push(`- レイテンシ: ${r.latencyMs != null ? Math.round(r.latencyMs) + ' ms' : '-'}`);
+    if (r.firstTokenLatencyMs != null) lines.push(`- 初回トークンまで: ${Math.round(r.firstTokenLatencyMs)} ms`);
     lines.push(`- トークン数: prompt ${u.prompt_tokens ?? '-'} / completion ${u.completion_tokens ?? '-'} / total ${u.total_tokens ?? '-'}`);
+    if (u.prompt_tokens_details?.cached_tokens) lines.push(`- キャッシュヒット: ${u.prompt_tokens_details.cached_tokens} tokens`);
     if (r.finishReason) lines.push(`- finish_reason: ${r.finishReason}`);
     if (r.judge) {
       if (r.judge.error) lines.push(`- Judge: エラー（${r.judge.error}）`);
@@ -1535,6 +1559,7 @@ function exportJSON() {
     },
     runs: runs.map(r => ({
       index: r.index, output: r.output, error: r.error, latencyMs: r.latencyMs,
+      firstTokenLatencyMs: r.firstTokenLatencyMs,
       usage: r.usage, finishReason: r.finishReason, judge: r.judge, jsonCheck: r.jsonCheck,
     })),
     trendAnalysis: document.getElementById('trendEnabled').checked ? trendResult : null,
