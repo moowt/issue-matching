@@ -800,14 +800,39 @@ async function embedTexts(baseUrl, apiKey, model, texts) {
   return data.data.sort((a,b) => a.index - b.index).map(d => d.embedding);
 }
 
+function extractFirstJsonObject(text) {
+  const start = text.indexOf('{');
+  if (start === -1) return null;
+  let depth = 0, inString = false, escape = false;
+  for (let i = start; i < text.length; i++) {
+    const c = text[i];
+    if (inString) {
+      if (escape) escape = false;
+      else if (c === '\\') escape = true;
+      else if (c === '"') inString = false;
+      continue;
+    }
+    if (c === '"') { inString = true; continue; }
+    if (c === '{') depth++;
+    else if (c === '}') {
+      depth--;
+      if (depth === 0) return text.slice(start, i + 1);
+    }
+  }
+  return null;
+}
+
 function parseJudgeJson(text) {
   if (!text) return null;
   let t = text.trim();
   const fence = t.match(/```(?:json)?\s*([\s\S]*?)```/i);
   if (fence) t = fence[1].trim();
   try { return JSON.parse(t); } catch {}
-  const m = t.match(/\{[\s\S]*\}/);
-  if (m) { try { return JSON.parse(m[0]); } catch {} }
+  // Model sometimes appends trailing prose or a second JSON blob after the
+  // real answer — a naive "first { to last }" match breaks on those, so scan
+  // for the first *balanced* object instead.
+  const obj = extractFirstJsonObject(t);
+  if (obj) { try { return JSON.parse(obj); } catch {} }
   return null;
 }
 
@@ -959,7 +984,11 @@ async function judgeRun(baseUrl, apiKey, model, rubric, systemPrompt, userPrompt
   }
 
   const parsed = parseJudgeJson(res.content);
-  if (!parsed || typeof parsed.score !== 'number') {
+  // response_format:json_object only guarantees valid JSON syntax, not field
+  // types — models frequently return the score as a numeric string ("8")
+  // rather than a number, which used to be rejected as a "parse failure".
+  const score = parsed ? Number(parsed.score) : NaN;
+  if (!parsed || isNaN(score)) {
     const reasonHint = !res.content
       ? '（出力が空でした。max_tokens不足で打ち切られた可能性があります）'
       : res.finishReason === 'length'
@@ -967,7 +996,7 @@ async function judgeRun(baseUrl, apiKey, model, rubric, systemPrompt, userPrompt
         : '';
     return { score: null, reason: null, raw: res.content, error: `JSON解析に失敗しました${reasonHint}` };
   }
-  return { score: parsed.score, reason: parsed.reason ?? '', raw: res.content };
+  return { score, reason: parsed.reason ?? '', raw: res.content };
 }
 
 async function analyzeTrend(baseUrl, apiKey, model, systemPrompt, userPrompt, outputs, signal) {
