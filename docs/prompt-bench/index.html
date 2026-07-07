@@ -304,6 +304,14 @@
       </div>
     </div>
 
+    <label class="option-row" style="margin-bottom:16px;">
+      <input type="checkbox" id="streamingEnabled">
+      <span>
+        ストリーミングで受信する
+        <span class="info-icon">ⓘ<span class="tooltip">有効にすると生成中の出力をリアルタイムに画面へ反映します。出力が大きい場合、非ストリーミングだと1回の巨大なレスポンスを待つ間にプロバイダ/経路側のタイムアウトで途中までしか受信できないことがありますが、ストリーミングはデータが継続的に流れるためこの問題を避けやすくなります。プロバイダによってはトークン使用量(usage)がストリーミング応答に含まれない場合があります。</span></span>
+      </span>
+    </label>
+
     <button type="button" class="btn btn-ghost" id="advParamsBtn" onclick="toggleAdvancedParams()">+ 詳細パラメータ（top_p / max_tokens / reasoning_effort / Structured Output）</button>
     <div class="option-body" id="advParamsBody">
       <label class="option-row">
@@ -675,12 +683,13 @@ function describeError(e) {
   return e.message || String(e);
 }
 
-async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, extra = {}, onRetry) {
+async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, extra = {}, onRetry, onChunk) {
   // 429 (rate limit) is retried until it succeeds, the caller aborts (Stop
   // button), or the safety ceiling below is hit — a low fixed retry count
   // gives up long before a tight per-minute token budget actually resets.
   const maxRetries = 100;
   const maxFallbackWaitMs = 60000;
+  const streaming = !!onChunk;
   let attempt = 0;
   while (true) {
     const start = performance.now();
@@ -689,7 +698,11 @@ async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, 
       r = await fetch(`${baseUrl}/chat/completions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-        body: JSON.stringify({ model, messages, temperature: params.temperature, top_p: params.topP, max_tokens: params.maxTokens, ...extra }),
+        body: JSON.stringify({
+          model, messages, temperature: params.temperature, top_p: params.topP, max_tokens: params.maxTokens,
+          ...(streaming ? { stream: true, stream_options: { include_usage: true } } : {}),
+          ...extra,
+        }),
         signal,
       });
     } catch (e) {
@@ -704,23 +717,54 @@ async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, 
       await sleep(waitMs, signal);
       continue;
     }
-    const latencyMs = performance.now() - start;
     if (!r.ok) {
       const e = await r.json().catch(() => ({}));
       throw new Error(`API ${r.status}: ${e.error?.message || r.statusText}`);
     }
-    const data = await r.json();
     const remainingTokens = parseInt(r.headers.get('x-ratelimit-remaining-tokens'), 10);
-    return {
-      content: data.choices?.[0]?.message?.content ?? '',
-      finishReason: data.choices?.[0]?.finish_reason ?? null,
-      usage: data.usage ?? null,
-      latencyMs,
-      rateLimit: !isNaN(remainingTokens) ? {
-        remainingTokens,
-        resetTokens: r.headers.get('x-ratelimit-reset-tokens'),
-      } : null,
-    };
+    const rateLimit = !isNaN(remainingTokens) ? {
+      remainingTokens,
+      resetTokens: r.headers.get('x-ratelimit-reset-tokens'),
+    } : null;
+
+    if (!streaming) {
+      const latencyMs = performance.now() - start;
+      const data = await r.json();
+      return {
+        content: data.choices?.[0]?.message?.content ?? '',
+        finishReason: data.choices?.[0]?.finish_reason ?? null,
+        usage: data.usage ?? null,
+        latencyMs,
+        rateLimit,
+      };
+    }
+
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+    let content = '';
+    let finishReason = null;
+    let usage = null;
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop();
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed.startsWith('data:')) continue;
+        const payload = trimmed.slice(5).trim();
+        if (payload === '[DONE]') continue;
+        let chunk;
+        try { chunk = JSON.parse(payload); } catch { continue; }
+        const delta = chunk.choices?.[0]?.delta?.content;
+        if (delta) { content += delta; onChunk(content); }
+        if (chunk.choices?.[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason;
+        if (chunk.usage) usage = chunk.usage;
+      }
+    }
+    return { content, finishReason, usage, latencyMs: performance.now() - start, rateLimit };
   }
 }
 
@@ -979,6 +1023,7 @@ async function runBench() {
   const trendModel = document.getElementById('trendModel').value.trim() || model;
 
   const jsonCheckEnabled = document.getElementById('jsonCheckEnabled').checked;
+  const streamingEnabled = document.getElementById('streamingEnabled').checked;
 
   const reasoningEffortEnabled = document.getElementById('reasoningEffortEnabled').checked;
   const reasoningEffort = document.getElementById('reasoningEffort').value;
@@ -1036,8 +1081,15 @@ async function runBench() {
       const controller = new AbortController();
       activeControllers.add(controller);
       try {
+        let lastRenderAt = 0;
+        const onChunk = streamingEnabled ? (partial) => {
+          runs[i].output = partial;
+          const now = performance.now();
+          if (now - lastRenderAt > 150) { lastRenderAt = now; renderRunCard(i); }
+        } : undefined;
         const res = await chatCompletion(baseUrl, apiKey, model, messages, params, controller.signal, executionExtra,
-          (waitMs, attempt) => updateProgress(`実行 ${i+1}/${n}: レート制限中… ${Math.ceil(waitMs/1000)}秒後に再試行（${attempt}回目、「停止」でキャンセル可）`));
+          (waitMs, attempt) => updateProgress(`実行 ${i+1}/${n}: レート制限中… ${Math.ceil(waitMs/1000)}秒後に再試行（${attempt}回目、「停止」でキャンセル可）`),
+          onChunk);
         runs[i].output = res.content;
         runs[i].finishReason = res.finishReason;
         runs[i].latencyMs = res.latencyMs;
@@ -1353,6 +1405,7 @@ function generateMarkdownReport() {
   const judgeEnabled = document.getElementById('judgeEnabled').checked;
   const embEnabled = document.getElementById('embEnabled').checked;
   const jsonCheckEnabled = document.getElementById('jsonCheckEnabled').checked;
+  const streamingEnabled = document.getElementById('streamingEnabled').checked;
   const structuredOutputEnabled = document.getElementById('structuredOutputEnabled').checked;
   const structuredOutputMode = document.getElementById('structuredOutputMode').value;
 
@@ -1374,6 +1427,7 @@ function generateMarkdownReport() {
   lines.push(`| top_p | ${topP} |`);
   lines.push(`| max_tokens | ${maxTokens} |`);
   lines.push(`| reasoning_effort | ${reasoningEffort} |`);
+  lines.push(`| ストリーミング | ${streamingEnabled ? '有効' : '無効'} |`);
   lines.push(`| 繰り返し回数 | ${runs.length} |`);
   if (structuredOutputEnabled) lines.push(`| Structured Output | ${structuredOutputMode} |`);
   lines.push('');
@@ -1462,6 +1516,7 @@ function exportJSON() {
       topP: document.getElementById('topPEnabled').checked ? parseFloat(document.getElementById('topP').value) : null,
       maxTokens: document.getElementById('maxTokensEnabled').checked ? parseInt(document.getElementById('maxTokens').value, 10) : null,
       reasoningEffort: document.getElementById('reasoningEffortEnabled').checked ? document.getElementById('reasoningEffort').value : null,
+      streamingEnabled: document.getElementById('streamingEnabled').checked,
       repeatN: parseInt(document.getElementById('repeatN').value, 10),
       concurrency: parseInt(document.getElementById('concurrency').value, 10),
       judgeEnabled: document.getElementById('judgeEnabled').checked,
