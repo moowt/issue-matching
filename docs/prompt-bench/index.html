@@ -1064,6 +1064,7 @@ async function runBench() {
   document.getElementById('runBtn').disabled = true;
   document.getElementById('stopBtn').classList.remove('hidden');
   document.getElementById('progWrap').classList.remove('hidden');
+  setProgress(0, '開始しています…');
   document.getElementById('summaryCard').classList.add('hidden');
   renderRunListSkeleton(n);
   document.getElementById('results').classList.remove('hidden');
