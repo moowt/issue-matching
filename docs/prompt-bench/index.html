@@ -416,7 +416,7 @@ strictモードでは全プロパティをrequiredに含め、additionalProperti
     <div class="option-body" id="judgeBody">
       <div class="form-group">
         <label for="rubric">採点基準（rubric）</label>
-        <textarea id="rubric" rows="3" placeholder="例: 指示への忠実さ・簡潔さ・事実の正確さを重視して1〜10点で採点してください">指示への忠実さ、論理的整合性、簡潔さを基準に1〜10点で採点してください。</textarea>
+        <textarea id="rubric" rows="3" placeholder="例: 指示への忠実さ・簡潔さ・事実の正確さを重視して1〜10点で採点してください">指示への忠実さ、JSON構造としての論理的整合性を基準に1〜10点で採点してください。簡潔さは評価対象外です。</textarea>
       </div>
       <div class="form-group" style="max-width:360px;">
         <label for="judgeModel">Judgeモデル（空欄なら実行モデルと同じ）</label>
@@ -942,7 +942,7 @@ const REASONING_MODEL_RE = /^openai\/gpt-oss/i;
 
 async function judgeRun(baseUrl, apiKey, model, rubric, systemPrompt, userPrompt, output, signal) {
   const judgeMessages = [
-    { role: 'system', content: 'あなたは公平で厳格な評価者です。与えられた採点基準に従い出力を1〜10点の整数で採点し、必ず次のJSON形式のみで回答してください。他のテキストは含めないでください。\n{"score": <1-10の整数>, "reason": "<日本語で60字程度の理由>"}' },
+    { role: 'system', content: 'あなたは公平で厳格な評価者です。与えられた採点基準に従い出力を1〜10点の整数で採点し、必ず次のJSON形式のみで回答してください。他のテキストは含めないでください。評価対象の出力がどの言語（中国語・英語など）であっても、それに引きずられず、reasonは必ず日本語で記述してください。\n{"score": <1-10の整数>, "reason": "<日本語で60字程度の理由>"}' },
     { role: 'user', content: `【採点基準】\n${rubric}\n\n【元のシステムプロンプト】\n${systemPrompt || '(なし)'}\n\n【元のユーザープロンプト】\n${userPrompt}\n\n【評価対象の出力】\n${output}` },
   ];
   const judgeParams = { temperature: 0, topP: 1, maxTokens: undefined };
