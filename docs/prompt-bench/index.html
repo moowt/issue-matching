@@ -525,6 +525,7 @@ strictモードでは全プロパティをrequiredに含め、additionalProperti
 ・<strong>ms（先頭）</strong>: リクエスト開始から完了までの合計時間<br>
 ・<strong>初回</strong>: ストリーミング有効時のみ。最初のトークンが届くまでの時間（レスポンス生成が始まった目安）<br>
 ・<strong>prompt / completion / total</strong>: 入力（システム+ユーザープロンプト）のトークン数 / モデルが生成した出力のトークン数 / その合計<br>
+・<strong>completionの内訳（思考/出力）</strong>: 推論モデルの場合、completionのうち思考(reasoning)に使われたトークン数と実際の出力に使われたトークン数の内訳（対応プロバイダのみ）<br>
 ・<strong>キャッシュ</strong>: プロンプトキャッシュがヒットしたトークン数（対応プロバイダのみ）<br>
 ・<strong>finish</strong>: 生成が止まった理由。stop=正常終了、length=max_tokens上限で打ち切り<br>
 ・<strong>残TPM</strong>: プロバイダ申告の1分あたりトークン残数（対応プロバイダのみ）</span></span>
@@ -1276,10 +1277,12 @@ function renderRunCard(i) {
 
   const u = r.usage || {};
   const cachedTokens = u.prompt_tokens_details?.cached_tokens;
+  const reasoningTokens = u.completion_tokens_details?.reasoning_tokens;
+  const completionLabel = `completion:${u.completion_tokens ?? '-'}${reasoningTokens ? `（思考:${reasoningTokens} / 出力:${u.completion_tokens - reasoningTokens}）` : ''}`;
   const chips = [
     `<span class="run-meta-chip">${r.latencyMs != null ? Math.round(r.latencyMs) + ' ms' : '-'}</span>`,
     r.firstTokenLatencyMs != null ? `<span class="run-meta-chip" title="ストリーミングで最初のトークンが届くまでの時間">初回:${Math.round(r.firstTokenLatencyMs)}ms</span>` : '',
-    `<span class="run-meta-chip">prompt:${u.prompt_tokens ?? '-'} / completion:${u.completion_tokens ?? '-'} / total:${u.total_tokens ?? '-'}</span>`,
+    `<span class="run-meta-chip" title="推論モデルの場合、思考(reasoning)と実際の出力の内訳（対応プロバイダのみ）">prompt:${u.prompt_tokens ?? '-'} / ${completionLabel} / total:${u.total_tokens ?? '-'}</span>`,
     cachedTokens ? `<span class="run-meta-chip" style="color:var(--success);" title="プロンプトキャッシュがヒットしたトークン数（プロバイダ申告値）">キャッシュ:${cachedTokens}</span>` : '',
     r.finishReason ? `<span class="run-meta-chip">finish:${escapeHtml(r.finishReason)}</span>` : '',
     r.rateLimit ? `<span class="run-meta-chip" title="1分あたりのトークン残数（プロバイダ申告値）">残TPM:${r.rateLimit.remainingTokens}</span>` : '',
@@ -1528,6 +1531,10 @@ function generateMarkdownReport() {
     lines.push(`- レイテンシ: ${r.latencyMs != null ? Math.round(r.latencyMs) + ' ms' : '-'}`);
     if (r.firstTokenLatencyMs != null) lines.push(`- 初回トークンまで: ${Math.round(r.firstTokenLatencyMs)} ms`);
     lines.push(`- トークン数: prompt ${u.prompt_tokens ?? '-'} / completion ${u.completion_tokens ?? '-'} / total ${u.total_tokens ?? '-'}`);
+    if (u.completion_tokens_details?.reasoning_tokens) {
+      const rt = u.completion_tokens_details.reasoning_tokens;
+      lines.push(`- completion内訳: 思考 ${rt} / 出力 ${u.completion_tokens - rt}`);
+    }
     if (u.prompt_tokens_details?.cached_tokens) lines.push(`- キャッシュヒット: ${u.prompt_tokens_details.cached_tokens} tokens`);
     if (r.finishReason) lines.push(`- finish_reason: ${r.finishReason}`);
     if (r.judge) {
