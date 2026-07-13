@@ -547,6 +547,7 @@ let stopRequested = false;
 let activeControllers = new Set();
 let runs = []; // { index, output, error, latencyMs, usage, judge, embVec }
 let trendResult = null; // { text, error }
+let lastRunAt = null;
 
 // ─── Utilities ──────────────────────────────────────────────────────────────
 
@@ -1104,6 +1105,7 @@ async function runBench() {
 
   stopRequested = false;
   activeControllers = new Set();
+  lastRunAt = new Date();
   runs = new Array(n).fill(null).map((_, i) => ({ index: i, output: null, error: null, latencyMs: null, usage: null, judge: null, jsonCheck: null }));
   trendResult = null;
   document.getElementById('trendCard').classList.add('hidden');
@@ -1486,7 +1488,7 @@ function generateMarkdownReport() {
 
   const lines = [];
   lines.push('# Prompt Bench 実行結果', '');
-  lines.push(`実行日時: ${new Date().toLocaleString('ja-JP')}`, '');
+  lines.push(`実行日時: ${lastRunAt ? lastRunAt.toLocaleString('ja-JP') : '(不明)'}`, '');
 
   lines.push('## 設定', '');
   lines.push('| 項目 | 値 |', '|---|---|');
@@ -1582,6 +1584,7 @@ async function copyReport() {
 function exportJSON() {
   const payload = {
     exportedAt: new Date().toISOString(),
+    runAt: lastRunAt ? lastRunAt.toISOString() : null,
     config: {
       baseUrl: document.getElementById('baseUrl').value,
       model: document.getElementById('modelInput').value,
