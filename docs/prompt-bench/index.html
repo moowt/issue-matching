@@ -544,7 +544,7 @@ strictモードでは全プロパティをrequiredに含め、additionalProperti
 // ─── State ──────────────────────────────────────────────────────────────────
 
 let stopRequested = false;
-let activeControllers = new Set();
+let activeControllers = new Map(); // run index -> AbortController, so a single run can be cancelled without stopping the rest
 let runs = []; // { index, output, error, latencyMs, usage, judge, embVec }
 let trendResult = null; // { text, error }
 let lastRunAt = null;
@@ -1045,6 +1045,11 @@ function stopBench() {
   setMsg('停止をリクエストしました。実行中のリクエストが終わり次第停止します。', 'warn');
 }
 
+function cancelRun(i) {
+  const controller = activeControllers.get(i);
+  if (controller) controller.abort();
+}
+
 async function runBench() {
   const baseUrl = normalizeBase(document.getElementById('baseUrl').value);
   const apiKey = document.getElementById('apiKey').value.trim();
@@ -1104,7 +1109,7 @@ async function runBench() {
   if (reasoningEffortEnabled) executionExtra.reasoning_effort = reasoningEffort;
 
   stopRequested = false;
-  activeControllers = new Set();
+  activeControllers = new Map();
   lastRunAt = new Date();
   runs = new Array(n).fill(null).map((_, i) => ({ index: i, output: null, error: null, latencyMs: null, usage: null, judge: null, jsonCheck: null }));
   trendResult = null;
@@ -1143,7 +1148,7 @@ async function runBench() {
     let mainCompleted = 0;
     await runPool(n, async (i) => {
       const controller = new AbortController();
-      activeControllers.add(controller);
+      activeControllers.set(i, controller);
       try {
         let lastRenderAt = 0;
         const onChunk = streamingEnabled ? (partial) => {
@@ -1162,10 +1167,10 @@ async function runBench() {
         runs[i].firstTokenLatencyMs = res.firstTokenLatencyMs;
         if (jsonCheckEnabled) runs[i].jsonCheck = validateJsonStrict(res.content);
       } catch (e) {
-        if (e.name === 'AbortError') { runs[i].error = '停止されました'; }
+        if (e.name === 'AbortError') { runs[i].error = '中断されました'; }
         else { runs[i].error = describeError(e); }
       }
-      activeControllers.delete(controller);
+      activeControllers.delete(i);
       mainCompleted++;
       phaseStatus('main', mainCompleted, n);
       renderRunCard(i);
@@ -1177,13 +1182,13 @@ async function runBench() {
       await runPool(n, async (i) => {
         if (stopRequested || runs[i].output == null) return;
         const controller = new AbortController();
-        activeControllers.add(controller);
+        activeControllers.set(i, controller);
         try {
           runs[i].judge = await judgeRun(baseUrl, apiKey, judgeModel, rubric, systemPrompt, userPrompt, runs[i].output, controller.signal);
         } catch (e) {
-          runs[i].judge = { score: null, reason: null, error: describeError(e) };
+          runs[i].judge = { score: null, reason: null, error: e.name === 'AbortError' ? '中断されました' : describeError(e) };
         }
-        activeControllers.delete(controller);
+        activeControllers.delete(i);
         judged++;
         phaseStatus('judge', judged, toJudge);
         renderRunCard(i);
@@ -1249,7 +1254,8 @@ function renderRunListSkeleton(n) {
     const div = document.createElement('div');
     div.className = 'run-card';
     div.id = 'run_' + i;
-    div.innerHTML = `<div class="run-head"><span class="run-idx">#${i+1}</span><span class="spinner"></span> 実行待ち…</div>`;
+    div.innerHTML = `<div class="run-head"><span class="run-idx">#${i+1}</span><span class="spinner"></span> 実行待ち…
+      <button class="btn btn-ghost" onclick="cancelRun(${i})" style="margin-left:auto;font-size:11px;padding:2px 8px;color:var(--danger);border-color:var(--danger);" title="この実行のみ中断します（他の実行は続行します）">✕ 中断</button></div>`;
     list.appendChild(div);
   }
 }
@@ -1300,7 +1306,10 @@ function renderRunCard(i) {
       judgeHtml = `<div class="judge-box"><span class="judge-score">${r.judge.score} / 10</span> — ${escapeHtml(r.judge.reason || '')}</div>`;
     }
   } else if (document.getElementById('judgeEnabled').checked && r.output != null) {
-    judgeHtml = `<div class="judge-box"><span class="spinner"></span> 採点中…</div>`;
+    judgeHtml = `<div class="judge-box" style="display:flex;align-items:center;gap:8px;">
+      <span class="spinner"></span> 採点中…
+      <button class="btn btn-ghost" onclick="cancelRun(${i})" style="margin-left:auto;font-size:11px;padding:2px 8px;color:var(--danger);border-color:var(--danger);" title="この採点のみ中断します（他の実行・採点は続行します）">✕ 中断</button>
+    </div>`;
   }
 
   el.innerHTML = `
