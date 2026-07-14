@@ -312,6 +312,14 @@
       </span>
     </label>
 
+    <label class="option-row" style="margin-bottom:16px;">
+      <input type="checkbox" id="warmupEnabled">
+      <span>
+        実行前にシステムプロンプトだけでキャッシュをウォームアップする
+        <span class="info-icon">ⓘ<span class="tooltip">プロンプトキャッシュは「一致する最長プレフィックス」を再利用する仕組みのため、システムプロンプトが固定でユーザープロンプト（データ）だけが毎回変わる実運用を想定し、本計測の前にシステムプロンプト＋簡易なダミーのユーザーメッセージだけで1回リクエストを送り、キャッシュを温めます。このウォームアップ実行の結果・トークン数は集計・結果一覧には含めません。</span></span>
+      </span>
+    </label>
+
     <button type="button" class="btn btn-ghost" id="advParamsBtn" onclick="toggleAdvancedParams()">+ 詳細パラメータ（top_p / max_tokens / reasoning_effort / Structured Output）</button>
     <div class="option-body" id="advParamsBody">
       <label class="option-row">
@@ -332,7 +340,7 @@
         </span>
       </label>
       <div class="form-group" style="max-width:200px;margin-top:8px;">
-        <input type="number" id="maxTokens" value="4096" min="1" max="32768" step="1" disabled>
+        <input type="number" id="maxTokens" value="80000" min="1" max="200000" step="1" disabled>
       </div>
 
       <label class="option-row">
@@ -1078,6 +1086,7 @@ async function runBench() {
 
   const jsonCheckEnabled = document.getElementById('jsonCheckEnabled').checked;
   const streamingEnabled = document.getElementById('streamingEnabled').checked;
+  const warmupEnabled = document.getElementById('warmupEnabled').checked;
 
   const reasoningEffortEnabled = document.getElementById('reasoningEffortEnabled').checked;
   const reasoningEffort = document.getElementById('reasoningEffort').value;
@@ -1093,6 +1102,7 @@ async function runBench() {
   if (!userPrompt) return setMsg('ユーザープロンプトを入力してください', 'error');
   if (judgeEnabled && !rubric) return setMsg('LLM-as-Judgeを有効にする場合は採点基準を入力してください', 'error');
   if (embEnabled && (!embApiKey || !embModel)) return setMsg('Embeddingを有効にする場合はEmbedding APIキーとモデルを入力してください', 'error');
+  if (warmupEnabled && !systemPrompt.trim()) return setMsg('ウォームアップを有効にする場合はシステムプロンプトを入力してください', 'error');
 
   let executionExtra = {};
   if (structuredOutputEnabled) {
@@ -1131,11 +1141,13 @@ async function runBench() {
   // Each stage (本体の実行 / Judge採点 / Embedding計算 / 傾向分析) gets its own
   // labeled slice of the bar instead of being blended into one ambiguous
   // percentage, so it's always clear which stage is running.
-  const phases = ['main'];
+  const phases = [];
+  if (warmupEnabled) phases.push('warmup');
+  phases.push('main');
   if (judgeEnabled) phases.push('judge');
   if (embEnabled) phases.push('embedding');
   if (trendEnabled) phases.push('trend');
-  const phaseLabel = { main: '本体の実行', judge: 'LLM-as-Judge採点', embedding: 'Embedding計算', trend: '傾向分析' };
+  const phaseLabel = { warmup: 'キャッシュウォームアップ', main: '本体の実行', judge: 'LLM-as-Judge採点', embedding: 'Embedding計算', trend: '傾向分析' };
   const phaseStatus = (phaseKey, done, total, suffixOverride) => {
     const idx = phases.indexOf(phaseKey);
     const frac = total > 0 ? done / total : 0;
@@ -1145,6 +1157,24 @@ async function runBench() {
   };
 
   try {
+    if (warmupEnabled && !stopRequested) {
+      phaseStatus('warmup', 0, 1, '実行中…');
+      const warmupMessages = [
+        { role: 'system', content: systemPrompt },
+        { role: 'user', content: '(warmup)' },
+      ];
+      const controller = new AbortController();
+      activeControllers.set('warmup', controller);
+      try {
+        await chatCompletion(baseUrl, apiKey, model, warmupMessages, { temperature: 0, topP: undefined, maxTokens: 1 }, controller.signal, {},
+          (waitMs, attempt) => phaseStatus('warmup', 0, 1, `レート制限中… ${Math.ceil(waitMs/1000)}秒後に再試行（${attempt}回目）`));
+        phaseStatus('warmup', 1, 1);
+      } catch (e) {
+        if (e.name !== 'AbortError') setMsg(`ウォームアップに失敗しました（本体の実行は続行します）: ${describeError(e)}`, 'warn');
+      }
+      activeControllers.delete('warmup');
+    }
+
     let mainCompleted = 0;
     await runPool(n, async (i) => {
       const controller = new AbortController();
