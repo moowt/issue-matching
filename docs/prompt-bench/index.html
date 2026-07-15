@@ -439,6 +439,7 @@ strictモードでは全プロパティをrequiredに含め、additionalProperti
     <div class="option-body" id="embBody">
       <div class="card-note" style="margin-bottom:10px;">
         Groq APIは現時点でembeddingsエンドポイントを提供していないため、embeddingは別のOpenAI互換プロバイダを指定してください（デフォルトはOpenAI）。
+        OpenAIのtext-embedding-3-small/largeはいずれも入力上限が8,191トークン（largeにしても上限は変わりません）で、出力が長いと超過することがあるため、embedding計算時は各出力をこの上限に収まる範囲へ自動的に切り詰めます（比較対象の一部のみでの類似度評価になる点にご注意ください）。
       </div>
       <div class="form-row">
         <div class="form-group">
@@ -806,11 +807,21 @@ async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, 
   }
 }
 
+// OpenAI's text-embedding-3-small AND -large share the same 8,191 token
+// input limit (large only differs in output dimensionality/cost, not
+// context window), so switching models doesn't avoid overflow. Truncate by
+// character count instead of token count since there's no tokenizer here;
+// staying well under 8,191 even in the worst realistic case (dense CJK
+// text, where the char-to-token ratio is closest to 1:1) needs a fairly
+// conservative cutoff.
+const EMBEDDING_SAFE_CHAR_LIMIT = 6000;
+
 async function embedTexts(baseUrl, apiKey, model, texts) {
+  const truncated = texts.map(t => (t && t.length > EMBEDDING_SAFE_CHAR_LIMIT) ? t.slice(0, EMBEDDING_SAFE_CHAR_LIMIT) : t);
   const r = await fetch(`${normalizeBase(baseUrl)}/embeddings`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey}` },
-    body: JSON.stringify({ model, input: texts }),
+    body: JSON.stringify({ model, input: truncated }),
   });
   if (!r.ok) {
     const e = await r.json().catch(() => ({}));
