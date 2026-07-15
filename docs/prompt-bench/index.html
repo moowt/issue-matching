@@ -333,14 +333,14 @@
         <input type="number" id="topP" value="1" min="0" max="1" step="0.05" disabled>
       </div>
       <label class="option-row">
-        <input type="checkbox" id="maxTokensEnabled" onchange="toggleParamInput('maxTokens')">
+        <input type="checkbox" id="maxTokensEnabled" checked onchange="toggleParamInput('maxTokens')">
         <span>
           max_tokens を指定する
-          <span class="info-icon">ⓘ<span class="tooltip">生成する出力の最大トークン数。チェックを外すとリクエストに含めず、モデル/プロバイダ側の既定上限（多くの場合コンテキスト長近くまで）に委ねます。出力を意図的に打ち切りたい場合のみ指定してください。</span></span>
+          <span class="info-icon">ⓘ<span class="tooltip">生成する出力の最大トークン数。既定でON・大きめの値にしています。特にOpenRouterは同一モデルIDでも裏側の実プロバイダによって既定の出力上限がまちまち（8192など）で、未指定だと毎回違うプロバイダに当たって打ち切られ方が変わることがあるため、明示的に指定した方が安定します。チェックを外すとリクエストに含めず、モデル/プロバイダ側の既定上限に委ねます。</span></span>
         </span>
       </label>
       <div class="form-group" style="max-width:200px;margin-top:8px;">
-        <input type="number" id="maxTokens" value="80000" min="1" max="200000" step="1" disabled>
+        <input type="number" id="maxTokens" value="80000" min="1" max="200000" step="1">
       </div>
 
       <label class="option-row">
@@ -765,29 +765,39 @@ async function chatCompletion(baseUrl, apiKey, model, messages, params, signal, 
     let finishReason = null;
     let usage = null;
     let firstTokenAt = null;
+
+    const processLine = (line) => {
+      const trimmed = line.trim();
+      if (!trimmed.startsWith('data:')) return;
+      const payload = trimmed.slice(5).trim();
+      if (payload === '[DONE]' || !payload) return;
+      let chunk;
+      try { chunk = JSON.parse(payload); } catch { return; }
+      const delta = chunk.choices?.[0]?.delta?.content;
+      if (delta) {
+        if (firstTokenAt === null) firstTokenAt = performance.now();
+        content += delta;
+        onChunk(content);
+      }
+      if (chunk.choices?.[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason;
+      if (chunk.usage) usage = chunk.usage;
+    };
+
     while (true) {
       const { done, value } = await reader.read();
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       const lines = buffer.split('\n');
       buffer = lines.pop();
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed.startsWith('data:')) continue;
-        const payload = trimmed.slice(5).trim();
-        if (payload === '[DONE]') continue;
-        let chunk;
-        try { chunk = JSON.parse(payload); } catch { continue; }
-        const delta = chunk.choices?.[0]?.delta?.content;
-        if (delta) {
-          if (firstTokenAt === null) firstTokenAt = performance.now();
-          content += delta;
-          onChunk(content);
-        }
-        if (chunk.choices?.[0]?.finish_reason) finishReason = chunk.choices[0].finish_reason;
-        if (chunk.usage) usage = chunk.usage;
-      }
+      for (const line of lines) processLine(line);
     }
+    // The stream can close right after the final "data: ..." line with no
+    // trailing newline ever arriving — without this, that last chunk (often
+    // the one carrying finish_reason, or the tail of the JSON output) would
+    // sit unprocessed in `buffer` and get silently dropped.
+    buffer += decoder.decode();
+    if (buffer.trim()) processLine(buffer);
+
     return {
       content, finishReason, usage, rateLimit,
       latencyMs: performance.now() - start,
